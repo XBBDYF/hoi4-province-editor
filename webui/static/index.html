@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HOI4 地块细化 · Web 控制台</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header id="topbar">
+  <div class="brand">🗺️ HOI4 地块细化<span class="sub">Project_IRIS Web 控制台</span></div>
+  <div class="paths">
+    <label>mod</label><input id="modDir" spellcheck="false">
+    <label>输出</label><input id="outDir" spellcheck="false">
+    <button id="btnCache">构建/刷新缓存</button>
+    <span id="cacheChip" class="chip">缓存: 检查中…</span>
+  </div>
+</header>
+
+<div id="app">
+  <main id="mapwrap">
+    <div id="maparea">
+      <canvas id="map"></canvas>
+      <div id="layers">
+        <h4>图层</h4>
+        <div id="layerList"></div>
+      </div>
+      <div id="maptools">
+        <button id="zIn" title="放大">＋</button>
+        <button id="zOut" title="缩小">－</button>
+        <button id="zFit" title="适应窗口">适应</button>
+        <button id="z1" title="1:1">1:1</button>
+      </div>
+      <div id="legend"><h4>图例</h4><div id="legendBody"></div></div>
+      <div id="tooltip"></div>
+    </div>
+    <div id="statusbar">
+      <span>视角 <b id="stZoom">–</b></span>
+      <span>光标 <b id="stPos">–</b></span>
+      <span>省份 <b id="stProv">–</b></span>
+      <span>已选 <b id="stSel">无</b></span>
+      <span style="margin-left:auto" id="stMsg"></span>
+    </div>
+  </main>
+
+  <aside id="side">
+    <nav class="tabs">
+      <button data-tab="map" class="active">地图</button>
+      <button data-tab="analyze">分析</button>
+      <button data-tab="refine">细化</button>
+      <button data-tab="audit">检查</button>
+      <button data-tab="prov">省份</button>
+      <button data-tab="report">报告</button>
+    </nav>
+    <div class="panes">
+
+      <!-- 地图 -->
+      <section class="pane active" data-pane="map">
+        <fieldset><legend>地图信息</legend>
+          <div id="mapInfo" class="tiny">尚未加载缓存。</div>
+        </fieldset>
+        <fieldset><legend>定位 / 查询</legend>
+          <div class="row">
+            <input id="gotoId" placeholder="输入省份 ID" style="width:120px">
+            <button id="btnGoto">定位省份</button>
+            <button id="btnClearSel" class="ghost">清除选中</button>
+          </div>
+          <p class="hint">地图上：滚轮缩放（以光标为中心），拖动平移，单击选中省份，悬停查看信息。</p>
+        </fieldset>
+        <fieldset><legend>图例图层</legend>
+          <div class="row">
+            <button data-leg="sr" class="ghost">战略区图例</button>
+            <button data-leg="state" class="ghost">州图例</button>
+            <button data-leg="continent" class="ghost">大洲图例</button>
+          </div>
+        </fieldset>
+      </section>
+
+      <!-- 分析 -->
+      <section class="pane" data-pane="analyze">
+        <div class="toolbar">
+          <button id="btnAnalyze" class="primary">① 分析（不写入）</button>
+          <button id="btnCancel1" class="ghost" disabled>取消</button>
+          <span id="anaSpinner" style="display:none"><span class="spin"></span> 运行中…</span>
+        </div>
+        <div id="anaSummary" class="hint"></div>
+        <div class="tblwrap"><table class="tbl" id="anaTable">
+          <thead><tr>
+            <th data-k="prov_id">ID</th><th>色</th><th data-k="area" class="num">面积</th>
+            <th data-k="k" class="num">拆分</th><th data-k="type">类型</th>
+            <th data-k="continent_name">大洲</th><th data-k="state">state</th><th data-k="sr">战略区</th>
+          </tr></thead><tbody></tbody>
+        </table></div>
+      </section>
+
+      <!-- 细化 -->
+      <section class="pane" data-pane="refine">
+        <div class="toolbar">
+          <button id="btnRun" class="primary">② 开始细化（写出）</button>
+          <button id="btnCancel2" class="ghost" disabled>取消</button>
+          <button id="btnOpenOut" class="ghost">打开输出目录</button>
+          <span id="runSpinner" style="display:none"><span class="spin"></span> 运行中…</span>
+        </div>
+        <p class="hint">会把结果写到“输出目录”，默认不覆盖原 mod。</p>
+        <fieldset><legend>日志</legend><div id="log"></div></fieldset>
+        <fieldset><legend>预览图</legend>
+          <div id="previews" class="tiny">运行后显示 修改前 / 修改后。</div>
+        </fieldset>
+        <fieldset><legend>结果摘要</legend><div id="runSummary" class="tiny">—</div></fieldset>
+      </section>
+
+      <!-- 检查 -->
+      <section class="pane" data-pane="audit">
+        <div class="toolbar">
+          <button id="btnAudit" class="primary">③ 完整性检查</button>
+          <span id="audSpinner" style="display:none"><span class="spin"></span> 检查中…</span>
+        </div>
+        <div class="toolbar">
+          <button id="btnRepair" class="primary">🔧 修复（不细化）</button>
+          <span id="repSpinner" style="display:none"><span class="spin"></span> 修复中…</span>
+        </div>
+        <p class="hint">修复会把 战略区/州/铁路/海峡/运河 的修正写入“输出目录”，<b>不拆分任何地块</b>。修复完成后会自动重跑检查。</p>
+        <fieldset><legend>修复日志</legend><div id="repairLog" class="tiny" style="max-height:150px;overflow:auto;white-space:pre-wrap">—</div></fieldset>
+        <div id="auditBody" class="tiny">检查战略区/州归属、铁路断连、海峡运河、孤立碎块、十字交叉。</div>
+      </section>
+
+      <!-- 省份 -->
+      <section class="pane" data-pane="prov">
+        <div class="row" style="margin-bottom:8px">
+          <input id="pFilter" placeholder="筛选：ID / 类型 / 大洲 / state / 战略区" style="flex:1">
+          <label class="check"><input type="checkbox" id="pLandOnly">仅陆地</label>
+        </div>
+        <div id="pCount" class="tiny"></div>
+        <div class="tblwrap"><table class="tbl" id="provTable">
+          <thead><tr>
+            <th data-k="id">ID</th><th>色</th><th data-k="area" class="num">面积</th>
+            <th data-k="type">类型</th><th data-k="continent">大洲</th>
+            <th data-k="state">state</th><th data-k="sr">战略区</th>
+          </tr></thead><tbody></tbody>
+        </table></div>
+      </section>
+
+      <!-- 报告 -->
+      <section class="pane" data-pane="report">
+        <div class="toolbar">
+          <button data-rep="csv">report.csv</button>
+          <button data-rep="txt">report.txt</button>
+          <button data-rep="changed">changed_files.txt</button>
+        </div>
+        <div id="reportBody" class="tiny">选择一份报告查看。</div>
+      </section>
+
+      <!-- 参数 (共享, 显示在相关标签底部) -->
+    </div>
+  </aside>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
