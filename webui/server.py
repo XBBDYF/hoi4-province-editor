@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
-"""HOI4 地块细化 - HTML 前端后端 (Flask)。
+"""HOI4 province refinement - HTML frontend backend (Flask).
 
-启动:
-    py -3.13 server.py            # 默认 http://127.0.0.1:8730
+# Usage:
+    py -3.13 server.py            # default http://127.0.0.1:8730
     py -3.13 server.py --port 9000
 
 功能:
-  * 地图预览 (地形/省份/战略区/州/大洲/边界 图层, 缩放平移, 悬停查省份)
-  * 分析 (只读, 不写文件)
-  * 细化 (真正写出到输出目录, 带实时日志)
-  * 完整性检查 (战略区/州/铁路/海峡)
-  * 报告查看 / 输出预览图
+  * map preview (terrain/province/state/sr/continent/border layers, pan & zoom, hover)
+  * analyze (read-only)
+  * refine (write to output, live log)
+  * integrity check (sr / railway / strait)
+  * report viewer / output preview
 """
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ def _default_gradient():
 app = Flask(__name__, static_folder=os.path.join(HERE, "static"), static_url_path="/static")
 
 # --------------------------------------------------------------------------- #
-# 任务管理 (分析 / 细化 / 建缓存 / 审计 都走后台线程)
+# task manager (analyze / run / cache / audit run in background threads)
 # --------------------------------------------------------------------------- #
 TASKS: dict = {}
 TASK_LOCK = threading.Lock()
@@ -80,7 +80,7 @@ def _get_editor(mod, game, gmerge, ref=""):
 
 
 def _src_mod(d):
-    """返回 (实际源目录, game目录)。mod_dir 给了空串 => 只加载原版。"""
+    """Return (effective source dir, game dir). Empty mod_dir means vanilla only."""
     game = str(d.get("game_dir") or DEFAULT_GAME).strip()
     mod = str(d.get("mod_dir") or "").strip()
     return (mod or game), game
@@ -138,7 +138,7 @@ def parse_int_list(s):
     if isinstance(s, (list, tuple)):
         items = s
     else:
-        items = str(s).replace("，", ",").split(",")
+        items = str(s).replace("\uff0c", ",").split(",")
     for part in items:
         part = str(part).strip()
         if part:
@@ -160,7 +160,7 @@ def parse_parts(s):
             except (ValueError, TypeError):
                 pass
         return d
-    for part in str(s).replace("，", ",").split(","):
+    for part in str(s).replace("\uff0c", ",").split(","):
         part = part.strip()
         if part and ":" in part:
             k, v = part.split(":", 1)
@@ -235,7 +235,7 @@ def summary_to_dict(s) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# 静态 / 基础
+# static / basic
 # --------------------------------------------------------------------------- #
 @app.route("/")
 def index():
@@ -257,7 +257,7 @@ ALLOWED_ROOTS = [ROOT, DEFAULT_MOD, DEFAULT_GAME, DEFAULT_OUT, CACHE_DIR]
 
 @app.route("/api/file")
 def api_file():
-    """安全地按绝对路径提供文件 (限定在 project/mod/output/cache 根目录内)。"""
+    """Safely serve a file by absolute path (within project/mod/output/cache)."""
     from flask import send_file
     p = request.args.get("path", "")
     if not p:
@@ -321,7 +321,7 @@ def api_state():
 
 
 # --------------------------------------------------------------------------- #
-# 建缓存
+# build cache
 # --------------------------------------------------------------------------- #
 @app.route("/api/cache/build", methods=["POST"])
 def api_cache_build():
@@ -351,11 +351,11 @@ def _run_job(d, dry, tid):
     try:
         cfg = build_config(d, dry=dry)
         if not os.path.isdir(os.path.join(cfg.mod_dir, "map")):
-            task_finish(tid, error="找不到 mod 的 map 目录: %s" % cfg.mod_dir)
+            task_finish(tid, error="mod map dir not found: %s" % cfg.mod_dir)
             return
         if not cfg.out_dir:
             cfg.out_dir = os.path.join(os.path.dirname(cfg.mod_dir), "地块细化输出")
-        task_log(tid, "模式: %s" % ("分析(只读)" if dry else "执行(写出)"))
+        task_log(tid, "mode: %s" % ("analyze(read-only)" if dry else "run(write)"))
         task_log(tid, "mod: %s" % cfg.mod_dir)
         if cfg.game_dir:
             task_log(tid, "原版: %s" % cfg.game_dir)
@@ -385,7 +385,7 @@ def api_run():
 
 @app.route("/api/repair", methods=["POST"])
 def api_repair():
-    """只修复、不拆分: 关闭渐变与强制项, 阈值设为无穷大, 只跑完整性修复。"""
+    """Repair only (no splitting): disable gradient/forced ids, huge threshold."""
     d = request.get_json(force=True, silent=True) or {}
     d2 = dict(d)
     d2["threshold"] = 2147483647
@@ -422,7 +422,7 @@ def api_audit():
 
 
 # --------------------------------------------------------------------------- #
-# 任务查询 / SSE / 取消
+# task query / SSE / cancel
 # --------------------------------------------------------------------------- #
 @app.route("/api/task/<tid>")
 def api_task(tid):
@@ -497,11 +497,11 @@ def api_openout():
             return jsonify({"ok": True})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
-    return jsonify({"ok": False, "error": "目录不存在"})
+    return jsonify({"ok": False, "error": "directory not found"})
 
 
 # --------------------------------------------------------------------------- #
-# 编辑 (合并/删除/改归属/大洲 + 撤销重做 + 导出)
+# edit (merge/delete/assign/continent + undo/redo + export)
 # --------------------------------------------------------------------------- #
 def _edit_ok(ed, extra=None):
     r = {"ok": True, "status": ed.status()}
@@ -591,6 +591,125 @@ def api_edit_set_state():
     try:
         ed = _edit_params(d)
         ed.do_state_edit(d.get("file"), d.get("data") or {})
+        return _edit_ok(ed)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/rail", methods=["POST"])
+def api_edit_rail():
+    d = request.get_json(force=True, silent=True) or {}
+    try:
+        ed = _edit_params(d)
+        ed.do_rail(int(d.get("a")), int(d.get("b")), str(d.get("op") or "add"), int(d.get("level") or 1))
+        return _edit_ok(ed)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/rail_data")
+def api_edit_rail_data():
+    d = dict(request.args)
+    try:
+        ed = _edit_params(d)
+        return jsonify({"ok": True, "data": ed.rail_data()})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/rail_level", methods=["POST"])
+def api_edit_rail_level():
+    d = request.get_json(force=True, silent=True) or {}
+    try:
+        ed = _edit_params(d)
+        ed.do_rail_level(int(d.get("i")), int(d.get("level") or 1))
+        return _edit_ok(ed)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/rail_rm", methods=["POST"])
+def api_edit_rail_rm():
+    d = request.get_json(force=True, silent=True) or {}
+    try:
+        ed = _edit_params(d)
+        ed.do_rail_rm(int(d.get("i")))
+        return _edit_ok(ed)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/supply", methods=["POST"])
+def api_edit_supply():
+    d = request.get_json(force=True, silent=True) or {}
+    try:
+        ed = _edit_params(d)
+        ed.do_supply(int(d.get("pid")), str(d.get("op") or "add"))
+        return _edit_ok(ed)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/building", methods=["POST"])
+def api_edit_building():
+    d = request.get_json(force=True, silent=True) or {}
+    try:
+        ed = _edit_params(d)
+        ed.do_building(int(d.get("pid")), d.get("key"), d.get("wx"), d.get("wy"), str(d.get("op") or "add"))
+        return _edit_ok(ed)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/terrain_data")
+def api_edit_terrain_data():
+    d = dict(request.args)
+    try:
+        ed = _edit_params(d)
+        return jsonify({"ok": True, "data": ed.terrain_data()})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/export_terrain", methods=["POST"])
+def api_edit_export_terrain():
+    d = request.get_json(force=True, silent=True) or {}
+    try:
+        ed = _edit_params(d)
+        out = str(d.get("out_dir") or DEFAULT_OUT)
+        res = ed.export_terrain_bmp(out)
+        return jsonify({"ok": True, "result": res})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/terrain_auto", methods=["POST"])
+def api_edit_terrain_auto():
+    d = request.get_json(force=True, silent=True) or {}
+    try:
+        ed = _edit_params(d)
+        res = ed.do_terrain_auto()
+        return jsonify({"ok": True, "status": ed.status(), "count": res.get("count")})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/sr_data")
+def api_edit_sr_data():
+    d = dict(request.args)
+    try:
+        ed = _edit_params(d)
+        return jsonify({"ok": True, "data": ed.sr_data(d.get("file"))})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/set_sr", methods=["POST"])
+def api_edit_set_sr():
+    d = request.get_json(force=True, silent=True) or {}
+    try:
+        ed = _edit_params(d)
+        ed.do_sr_edit(d.get("file"), d.get("name"), d.get("weather"))
         return _edit_ok(ed)
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
@@ -712,7 +831,7 @@ def api_edit_export():
                       game_dir=str(d.get("game_dir") or DEFAULT_GAME),
                       game_merge=bool(d.get("game_merge", False)),
                       overlay_dir=out)
-                task_log(tid, "缓存已更新")
+                task_log(tid, "cache updated")
             except Exception as _e:
                 task_log(tid, "缓存重建失败: %s" % _e)
             task_finish(tid, result=res)

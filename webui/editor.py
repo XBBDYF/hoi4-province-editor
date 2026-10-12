@@ -176,6 +176,49 @@ _STATE_BODY = """state={{
 """
 
 
+def _brace_blocks(txt, key):
+    m = re.search(r"\b" + re.escape(key) + r"\s*=\s*\{", txt)
+    if not m:
+        return []
+    start = m.end() - 1
+    depth = 0
+    j = start
+    while j < len(txt):
+        if txt[j] == "{":
+            depth += 1
+        elif txt[j] == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        j += 1
+    return [txt[start:j + 1]]
+
+
+def _block_at(txt, brace):
+    depth = 0
+    j = brace
+    while j < len(txt):
+        if txt[j] == "{":
+            depth += 1
+        elif txt[j] == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        j += 1
+    return txt[brace:j + 1]
+
+
+def _rewrite_sr(text, name, weather):
+    out = text
+    if name:
+        out = re.sub(r'(name\s*=\s*)"[^"]*"', lambda m: m.group(1) + '"' + str(name) + '"', out, count=1)
+    if weather is not None and weather.strip() != "":
+        out2, ok = _replace_block(out, "weather", weather.rstrip() + "\n\t")
+        if ok:
+            out = out2
+    return out
+
+
 def _rename_railway_ids(text: str, idmap: dict) -> str:
     nl = "\r\n" if "\r\n" in text else "\n"
     out = []
@@ -248,6 +291,15 @@ class Editor:
             b = os.path.basename(fp)
             self.sr_src[b] = fp
             self.sr_txt[b] = _read_text(fp)
+        self._rail_p = _rresolve(self.mod, self.game, self.ref, "map", "railways.txt")
+        self._sup_p = _rresolve(self.mod, self.game, self.ref, "map", "supply_nodes.txt")
+        self._bld_p = _rresolve(self.mod, self.game, self.ref, "map", "buildings.txt")
+        self.base_rail = _read_text(self._rail_p) if os.path.isfile(self._rail_p) else ""
+        self.base_sup = _read_text(self._sup_p) if os.path.isfile(self._sup_p) else ""
+        self.base_bld = _read_text(self._bld_p) if os.path.isfile(self._bld_p) else ""
+        self.rail_txt = self.base_rail
+        self.sup_txt = self.base_sup
+        self.bld_txt = self.base_bld
         self.base_state_txt = dict(self.state_txt)
         self.base_sr_txt = dict(self.sr_txt)
         self._rebuild()
@@ -297,6 +349,24 @@ class Editor:
         elif k == "terrain":
             if int(op["pid"]) in self.recs:
                 self.recs[int(op["pid"])][6] = str(op["value"])
+        elif k == "sr_edit":
+            f = op.get("file")
+            if f in self.sr_txt:
+                self.sr_txt[f] = _rewrite_sr(self.sr_txt[f], op.get("name"), op.get("weather"))
+        elif k == "rail":
+            self._do_rail(op["a"], op["b"], op.get("op") == "add", op.get("level", 1))
+        elif k == "rail_level":
+            self._do_rail_level(op["i"], op["level"])
+        elif k == "rail_rm":
+            self._do_rail_rm(op["i"])
+        elif k == "supply":
+            self._do_supply(op["pid"], op.get("op") == "add")
+        elif k == "building":
+            self._do_building(op["pid"], op.get("key"), op.get("wx"), op.get("wy"), op.get("op") == "add")
+        elif k == "terrain_auto":
+            for _p, _v in (op.get("map") or {}).items():
+                if int(_p) in self.recs:
+                    self.recs[int(_p)][6] = str(_v)
         elif k == "state_edit":
             f = op.get("file")
             if f in self.state_txt:
@@ -311,6 +381,9 @@ class Editor:
         self.removed = set()
         self.state_txt = dict(self.base_state_txt)
         self.sr_txt = dict(self.base_sr_txt)
+        self.rail_txt = self.base_rail
+        self.sup_txt = self.base_sup
+        self.bld_txt = self.base_bld
         for op in self.ops:
             self._apply(op)
 
@@ -321,15 +394,30 @@ class Editor:
 
     def _resolve_file(self, txts, token):
         token = str(token).strip()
+        if not token:
+            return None
         if token in txts:
             return token
         low = token.lower()
+        lowtxt = low if low.endswith(".txt") else low + ".txt"
         for b in txts:
-            if b.lower() == low or b.lower() == (low + ".txt"):
+            if b.lower() == low or b.lower() == lowtxt:
                 return b
+        # 文件名不可靠: 按文件内部 id = N 匹配 (token 本身是数字, 或以数字开头如 596-Zhejiang)
+        m0 = re.match(r"^(\d+)", token)
+        if m0:
+            n = int(m0.group(1))
+            for b in txts:
+                m = re.search(r"\bid\s*=\s*(\d+)", txts[b])
+                if m and int(m.group(1)) == n:
+                    return b
+        # 退一步: 前缀/后缀/包含
         for b in txts:
             stem = os.path.splitext(b)[0].lower()
             if stem == low or stem.startswith(low + "-") or stem.endswith("-" + low):
+                return b
+        for b in txts:
+            if low and low in os.path.splitext(b)[0].lower():
                 return b
         return None
 
@@ -539,6 +627,350 @@ class Editor:
         self._apply(op)
         return op
 
+    def _land_adj(self):
+        if getattr(self, "_ladj", None) is not None:
+            return self._ladj
+        import collections as _c
+        land = set(p for p, r in self.recs.items() if r[4] == "land")
+        adj = _c.defaultdict(set)
+        pid = self.pid.astype(np.int64)
+        for (a, b) in ((pid[:, :-1], pid[:, 1:]), (pid[1:, :], pid[:-1, :])):
+            m = a != b
+            aa = a[m].tolist(); bb = b[m].tolist()
+            for x, y in zip(aa, bb):
+                if x > 0 and y > 0 and x in land and y in land:
+                    adj[x].add(y); adj[y].add(x)
+        # 海峡/运河: 两个陆地地块通过一个海/湖 province 相连
+        edges = []
+        blocked = []
+        ap = _rresolve(self.mod, self.game, self.ref, "map", "adjacencies.csv")
+        aps = []
+        if os.path.isfile(ap):
+            aps.append(ap)
+        for base in (self.game, self.mod):     # 原版补足: 主文件里没有的相邻对从另一来源补齐
+            q = os.path.join(base, "map", "adjacencies.csv")
+            if os.path.isfile(q) and not any(os.path.normcase(q) == os.path.normcase(x) for x in aps):
+                aps.append(q)
+        seen_pairs = set()
+        for pi, apx in enumerate(aps):
+            for i, ln in enumerate(_read_text(apx).split("\n")):
+                c = ln.rstrip("\r").split(";")
+                if i == 0 or len(c) < 4 or not c[0].strip().lstrip("-").isdigit():
+                    continue
+                try:
+                    f, t2_ = int(c[0]), int(c[1])
+                except ValueError:
+                    continue
+                typ = (c[2] or "").strip().lower()
+                rule = ((c[8] if len(c) > 8 else "") + " " + (c[9] if len(c) > 9 else "")).lower()
+                pk = (min(f, t2_), max(f, t2_))
+                if pk in seen_pairs:
+                    continue
+                if f in land and t2_ in land and f != t2_:
+                    seen_pairs.add(pk)
+                    if typ == "impassable":                 # 禁止直接相连
+                        blocked.append((min(f, t2_), max(f, t2_)))
+                        edges.append({"type": "impassable", "a": f, "b": t2_})
+                    elif typ in ("sea", "canal", "strait"):  # 跨海连接(海峡/运河) => 可穿越
+                        kind = "canal" if "canal" in rule else "strait"
+                        adj[f].add(t2_); adj[t2_].add(f)
+                        edges.append({"type": kind, "a": f, "b": t2_})
+        for (ba, bb) in blocked:                        # impassable: 从像素邻接中剔除
+            adj[ba].discard(bb); adj[bb].discard(ba)
+        self._ladj = adj
+        self._adj_edges = edges
+        return adj
+
+    def rail_path(self, a, b):
+        import collections as _c
+        a, b = int(a), int(b)
+        adj = self._land_adj()
+        if a not in adj or b not in adj:
+            return None
+        seen = {a: None}
+        q = _c.deque([a])
+        while q:
+            cur = q.popleft()
+            if cur == b:
+                break
+            for n in adj.get(cur, ()):
+                if n not in seen:
+                    seen[n] = cur
+                    q.append(n)
+        if b not in seen:
+            return None
+        path = []
+        cur = b
+        while cur is not None:
+            path.append(cur); cur = seen[cur]
+        return path[::-1]
+
+    def _do_rail_level(self, i, level):
+        lines = self.rail_txt.split("\n")
+        if 0 <= int(i) < len(lines):
+            tok = lines[i].split()
+            if len(tok) >= 3 and tok[0].isdigit():
+                tok[0] = str(int(level))
+                lines[int(i)] = " ".join(tok)
+                self.rail_txt = "\n".join(lines)
+
+    def _do_rail_rm(self, i):
+        lines = self.rail_txt.split("\n")
+        if 0 <= int(i) < len(lines):
+            del lines[int(i)]
+            self.rail_txt = "\n".join(lines)
+
+    def rail_data(self):
+        rails = []
+        for idx, ln in enumerate(self.rail_txt.split("\n")):
+            tok = ln.split()
+            if len(tok) >= 3 and tok[0].isdigit() and tok[1].isdigit():
+                nodes = [int(x) for x in tok[2:] if x.isdigit()]
+                if len(nodes) >= 2:
+                    rails.append({"i": idx, "level": int(tok[0]), "nodes": nodes})
+        sups = []
+        for ln in self.sup_txt.split("\n"):
+            tok = ln.split()
+            if len(tok) >= 2 and tok[1].isdigit():
+                sups.append({"level": int(tok[0]), "pid": int(tok[1])})
+        self._land_adj()
+        return {"rails": rails, "supplies": sups,
+                "edges": list(getattr(self, "_adj_edges", None) or []),
+                "land": [p for p, r in self.recs.items() if r[4] == "land"]}
+
+    def do_rail_level(self, i, level):
+        rec = {"kind": "rail_level", "i": int(i), "level": int(level)}
+        self.ops.append(rec); self.redo.clear(); self._apply(rec); return rec
+
+    def do_rail_rm(self, i):
+        rec = {"kind": "rail_rm", "i": int(i)}
+        self.ops.append(rec); self.redo.clear(); self._apply(rec); return rec
+
+    def _do_rail(self, a, b, add, level=1):
+        a, b = int(a), int(b)
+        if add:
+            ra, rb = self.recs.get(a), self.recs.get(b)
+            if not ra or not rb or ra[4] != "land" or rb[4] != "land":
+                raise ValueError("海上/湖泊地块不能放铁路（只能选陆地）")
+        out = []
+        hit = False
+        for ln in self.rail_txt.split("\n"):
+            tok = ln.split()
+            if len(tok) >= 4 and tok[0].isdigit():
+                ids = [int(x) for x in tok[2:] if x.isdigit()]
+                if a in ids and b in ids:
+                    hit = True
+                    if add:
+                        out.append(ln)
+                    continue
+            out.append(ln)
+        if add and not hit:
+            path = self.rail_path(a, b) or [a, b]
+            out.append("%d %d %s" % (int(level or 1), len(path), " ".join(map(str, path))))
+        self.rail_txt = "\n".join(out)
+
+    def _do_supply(self, pid, add):
+        pid = int(pid)
+        if add:
+            r0 = self.recs.get(pid)
+            if not r0 or r0[4] != "land":
+                raise ValueError("海上/湖泊地块不能放补给中心（只能选陆地）")
+        out = []
+        hit = False
+        for ln in self.sup_txt.split("\n"):
+            tok = ln.split()
+            if len(tok) >= 2 and tok[1].isdigit() and int(tok[1]) == pid:
+                hit = True
+                if add:
+                    out.append(ln)
+                continue
+            out.append(ln)
+        if add and not hit:
+            out.append("1 %d " % pid)
+        self.sup_txt = "\n".join(out)
+
+    def _do_building(self, pid, key, wx, wy, add):
+        pid = int(pid)
+        out = []
+        for ln in self.bld_txt.split("\n"):
+            c = ln.split(";")
+            if len(c) >= 2 and c[0].strip().isdigit() and int(c[0]) == pid and c[1].strip() == str(key):
+                if add:
+                    out.append(ln)
+                continue
+            out.append(ln)
+        if add:
+            out.append("%d;%s;%.2f;%.2f;0.50;0.00;%d" % (pid, key, float(wx or 0), float(wy or 0), pid))
+        self.bld_txt = "\n".join(out)
+
+    def do_rail(self, a, b, op="add", level=1):
+        rec = {"kind": "rail", "a": int(a), "b": int(b), "level": int(level or 1), "op": "add" if op == "add" else "remove"}
+        self.ops.append(rec); self.redo.clear(); self._apply(rec); return rec
+
+    def do_supply(self, pid, op="add"):
+        rec = {"kind": "supply", "pid": int(pid), "op": "add" if op == "add" else "remove"}
+        self.ops.append(rec); self.redo.clear(); self._apply(rec); return rec
+
+    def do_building(self, pid, key, wx, wy, op="add"):
+        rec = {"kind": "building", "pid": int(pid), "key": str(key), "wx": wx, "wy": wy,
+               "op": "add" if op == "add" else "remove"}
+        self.ops.append(rec); self.redo.clear(); self._apply(rec); return rec
+
+    def sr_data(self, file):
+        f = self._resolve_file(self.sr_txt, file)
+        if f is None:
+            raise ValueError("战略区不存在")
+        txt = self.sr_txt[f]
+        name = re.search(r'name\s*=\s*"([^"]*)"', txt)
+        weather = ""
+        m = re.search(r"weather\s*=\s*\{", txt)
+        if m:
+            i = m.end() - 1; d = 0; j = i
+            while j < len(txt):
+                if txt[j] == "{":
+                    d += 1
+                elif txt[j] == "}":
+                    d -= 1
+                    if d == 0:
+                        break
+                j += 1
+            weather = txt[i + 1:j].strip("\n")
+        pm = re.search(r"provinces\s*=\s*\{([^}]*)\}", txt)
+        ids = [x for x in (pm.group(1).split() if pm else []) if x.isdigit()]
+        return {"file": f, "name": name.group(1) if name else "", "weather": weather, "provinces": len(ids)}
+
+    def do_sr_edit(self, file, name=None, weather=None):
+        f = self._resolve_file(self.sr_txt, file)
+        if f is None:
+            raise ValueError("战略区不存在")
+        rec = {"kind": "sr_edit", "file": f, "name": name, "weather": weather}
+        self.ops.append(rec); self.redo.clear(); self._apply(rec); return rec
+
+    # ---- 地形 ----
+    def _terrain_defs(self):
+        if getattr(self, "_tdefs", None) is not None:
+            return self._tdefs
+        defs = {}
+        for root in (self.game, self.mod):
+            d = os.path.join(root, "common", "terrain") if root else ""
+            if not d or not os.path.isdir(d):
+                continue
+            for f in sorted(os.listdir(d)):
+                if f.lower().endswith(".txt"):
+                    txt = _read_text(os.path.join(d, f))
+                    for blk in _brace_blocks(txt, "categories"):
+                        for m in re.finditer(r"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\{", blk):
+                            seg = _block_at(blk, m.end() - 1)
+                            cm = re.search(r"color\s*=\s*\{\s*(\d+)\s+(\d+)\s+(\d+)", seg)
+                            if cm:
+                                defs[m.group(1)] = (int(cm.group(1)), int(cm.group(2)), int(cm.group(3)))
+        self._tdefs = defs
+        return defs
+
+    def terrain_data(self, autogen=False):
+        defs = self._terrain_defs()
+        names = sorted(defs.keys())
+        if not names:
+            return {"defs": {}, "prov": {}, "names": []}
+        bp = _rresolve(self.mod, self.game, self.ref, "map", "terrain.bmp")
+        if not os.path.isfile(bp):
+            return {"defs": defs, "prov": {}, "names": names}
+        him = Image.open(bp)
+        pal = him.getpalette() or []
+        palrgb = np.array((pal[:768] + [0] * (768 - len(pal[:768]))), dtype=np.int32).reshape(256, 3)
+        idx = np.asarray(him).astype(np.int64)
+        maxid = int(self.pid.max())
+        # 每个地块的主色索引
+        key = self.pid.astype(np.int64) * 256 + idx
+        cnt = np.bincount(key.ravel(), minlength=(maxid + 1) * 256).reshape(-1, 256)
+        maj = cnt.argmax(1)
+        # 从 definition.csv 反推 索引->地形 (多数票)
+        votes = {}
+        for pid in range(1, maxid + 1):
+            r = self.recs.get(pid)
+            if not r or r[4] != "land":
+                continue
+            if cnt[pid].sum() <= 0:
+                continue
+            votes.setdefault(int(maj[pid]), {})
+            nm = r[6]
+            votes[int(maj[pid])][nm] = votes[int(maj[pid])].get(nm, 0) + 1
+        idx2name = {i: max(v.items(), key=lambda kv: kv[1])[0] for i, v in votes.items()}
+        # 未知索引 -> 用颜色最近的地形兜底
+        cat = np.array([defs[n] for n in names], dtype=np.int32)
+        dist = ((palrgb[:, None, :] - cat[None, :, :]) ** 2).sum(-1)
+        color_best = dist.argmin(1)
+        prov = {}
+        agree = 0; tot = 0
+        for pid in range(1, maxid + 1):
+            r = self.recs.get(pid)
+            if not r or r[4] != "land":
+                continue
+            mi = int(maj[pid])
+            nm = idx2name.get(mi) or names[int(color_best[mi])]
+            prov[str(pid)] = nm
+            tot += 1
+            if nm == r[6]:
+                agree += 1
+        self._tmap_agree = (agree, tot)
+        return {"defs": defs, "prov": prov, "names": names, "agree": agree, "total": tot}
+
+    def do_terrain_auto(self):
+        d = self.terrain_data()
+        m = d.get("prov") or {}
+        if not m:
+            raise ValueError("未能从 terrain.bmp 解析出地形")
+        rec = {"kind": "terrain_auto", "map": m}
+        self.ops.append(rec); self.redo.clear(); self._apply(rec); return {"count": len(m)}
+
+    def export_terrain_bmp(self, out_dir):
+        """由 definition.csv 的地形生成 map/terrain.bmp (索引位图, 沿用原调色板), 直接导出。"""
+        bp = _rresolve(self.mod, self.game, self.ref, "map", "terrain.bmp")
+        if not os.path.isfile(bp):
+            raise ValueError("找不到 terrain.bmp 作为调色板参照")
+        him = Image.open(bp)
+        pal = him.getpalette()
+        idxmap = np.asarray(him).astype(np.int64)
+        maxid = int(self.pid.max())
+        # 索引 -> 地形名 (由 definition.csv 投票) + 每个地形名偏好用哪个索引
+        key = self.pid.astype(np.int64) * 256 + idxmap
+        cnt = np.bincount(key.ravel(), minlength=(maxid + 1) * 256).reshape(-1, 256)
+        votes = {}
+        for pid in range(1, maxid + 1):
+            r = self.recs.get(pid)
+            if not r or r[4] != "land" or cnt[pid].sum() <= 0:
+                continue
+            i0 = int(cnt[pid].argmax())
+            votes.setdefault(i0, {})
+            votes[i0][r[6]] = votes[i0].get(r[6], 0) + 1
+        idx2name = {i: max(v.items(), key=lambda kv: kv[1])[0] for i, v in votes.items()}
+        name2idx = {}
+        for i, nm in idx2name.items():
+            if nm not in name2idx:
+                name2idx[nm] = i
+        # 需要但没索引的地形 -> 用颜色最近
+        defs = self._terrain_defs()
+        palrgb = np.array((pal[:768] + [0] * (768 - len(pal[:768]))), dtype=np.int32).reshape(256, 3)
+        for nm, rgb in defs.items():
+            if nm not in name2idx:
+                d = ((palrgb - np.array(rgb, dtype=np.int32)) ** 2).sum(1)
+                name2idx[nm] = int(d.argmin())
+        lut = np.zeros(maxid + 2, dtype=np.uint8)
+        for pid in range(1, maxid + 1):
+            r = self.recs.get(pid)
+            if not r or r[4] != "land":
+                continue
+            nm = r[6]
+            if nm in name2idx:
+                lut[pid] = name2idx[nm]
+        out = lut[np.clip(self.pid, 0, maxid + 1)]
+        im = Image.fromarray(out, "P")
+        im.putpalette(pal)
+        os.makedirs(os.path.join(out_dir, "map"), exist_ok=True)
+        dst = os.path.join(out_dir, "map", "terrain.bmp")
+        im.save(dst)
+        return {"path": dst, "size": list(im.size), "terrains": len(name2idx)}
+
     def commit(self):
         """把当前编辑结果设为新基准(导出后调用), 之后导出只包含相对它的新增改动。"""
         self.base_recs = {k: list(v) for k, v in self.recs.items()}
@@ -546,6 +978,9 @@ class Editor:
         self.base_pid = self.pid.copy()
         self.base_state_txt = dict(self.state_txt)
         self.base_sr_txt = dict(self.sr_txt)
+        self.base_rail = self.rail_txt
+        self.base_sup = self.sup_txt
+        self.base_bld = self.bld_txt
         self.ops = []
         self.redo = []
         self.removed = set()
@@ -628,7 +1063,7 @@ class Editor:
         os.makedirs(os.path.join(out_dir, "map"), exist_ok=True)
         n_ops = len(self.ops)
         merges = [o for o in self.ops if o["kind"] == "merge"]
-        rec_changed = any(o["kind"] in ("continent", "terrain") for o in self.ops) or merges
+        rec_changed = any(o["kind"] in ("continent", "terrain", "terrain_auto") for o in self.ops) or merges
         if merges:
             log("写出 provinces.bmp ...")
             save_provinces_bmp(self.img, os.path.join(out_dir, "map", "provinces.bmp"))
@@ -659,6 +1094,12 @@ class Editor:
                 _write_text(os.path.join(out_dir, "map", "strategicregions", b), txt)
                 n_sr += 1
         log("写出 states(%d) / 战略区(%d) ..." % (n_st, n_sr))
+        if self.rail_txt and self.rail_txt != self.base_rail:
+            _write_text(os.path.join(out_dir, "map", "railways.txt"), self.rail_txt)
+        if self.sup_txt and self.sup_txt != self.base_sup:
+            _write_text(os.path.join(out_dir, "map", "supply_nodes.txt"), self.sup_txt)
+        if self.bld_txt and self.bld_txt != self.base_bld:
+            _write_text(os.path.join(out_dir, "map", "buildings.txt"), self.bld_txt)
 
         idmap = {}
         for o in merges:

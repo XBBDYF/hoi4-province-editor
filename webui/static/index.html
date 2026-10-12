@@ -143,6 +143,8 @@
             <option value="sr">战略区：底色=战略区，边框=州</option>
             <option value="continent">大洲：底色=大洲，边框=战略区</option>
             <option value="prov">地块(province)：合并/删除</option>
+            <option value="rail">铁路 / 补给</option>
+            <option value="terrain">地块地形</option>
           </select>
           <label>参考</label>
           <select id="edRef">
@@ -159,10 +161,17 @@
           <div id="edInfo" class="tiny"></div>
           <div class="row"><button id="edClearSel" class="ghost">清空选择</button></div>
         </fieldset>
-        <fieldset><legend>地块工具（省份层）</legend>
+        <fieldset id="fsTerrain" style="display:none"><legend>地块地形（读取 terrain.bmp）</legend>
+          <div id="terCur" class="tiny" style="color:var(--accent)">未选中地块</div>
+          <div class="row"><label>地形</label><select id="terSel" style="flex:1"></select><button id="terSave">保存地形</button></div>
+          <div class="row"><button id="terAuto" class="primary">用 terrain.bmp 自动生成（全部陆地）</button></div>
+          <div class="row"><button id="terExport" class="ghost">导出 terrain.bmp（由 definition.csv 生成）</button></div>
+          <div id="terInfo" class="tiny"></div>
+        </fieldset>
+        <fieldset id="fsProv" style="display:none"><legend>地块工具（省份层）</legend>
           <div class="row"><button id="edMerge">合并（第一个为目标）</button><button id="edDelete">删除（并入最大邻居）</button></div>
         </fieldset>
-        <fieldset><legend>编辑州（选中州后显示其数据，可修改并保存）</legend>
+        <fieldset id="fsState"><legend>编辑州（选中州后显示其数据，可修改并保存）</legend>
           <div id="nsCur" class="tiny" style="color:var(--accent)">未选择州</div>
           <div class="row"><label>当前州ID</label><input id="nsEditId" readonly style="width:120px"></div>
           <div class="grid">
@@ -178,7 +187,19 @@
           <div id="nsBuildings" class="tiny">—</div>
           <div class="row"><button id="nsSave" class="primary">保存州数据</button><button id="edNewStateCreate" class="ghost">用选中地块新建州</button></div>
         </fieldset>
-        <fieldset><legend>新建战略区</legend>
+        <fieldset id="fsSr" style="display:none"><legend>战略区数据（选中战略区后可改）</legend>
+          <div id="srCur" class="tiny" style="color:var(--accent)">未选择战略区</div>
+          <div class="row"><label>名称</label><input id="srName" style="flex:1"></div>
+          <div class="f full"><label>weather 内容（原样文本）</label><textarea id="srWeather" rows="6" style="width:100%"></textarea></div>
+          <div class="row"><button id="srSave" class="primary">保存战略区数据</button><span id="srProv" class="tiny"></span></div>
+        </fieldset>
+        <fieldset id="fsRail" style="display:none"><legend>铁路 / 补给（点击地图上的铁路线选中）</legend>
+          <div id="railInfo" class="tiny" style="color:var(--accent)">未选中铁路</div>
+          <div class="row"><label>等级</label><input id="railLevel" type="number" min="1" max="5" value="3" style="width:70px"><button id="railLevelSave">保存等级</button><button id="railDel" class="ghost">删除铁路</button></div>
+          <div class="row"><label>新建等级</label><input id="railNewLevel" type="number" min="1" max="5" value="3" style="width:70px"><button id="railClearSel" class="ghost">取消选中</button></div>
+          <div id="railStat" class="tiny"></div>
+        </fieldset>
+        <fieldset id="fsNewSr" style="display:none"><legend>新建战略区</legend>
           <div class="row"><input id="nsrId" type="number" placeholder="战略区ID" style="flex:1"><button id="edNewSrCreate" class="primary">用当前选中地块 新建战略区</button></div>
         </fieldset>
         <fieldset><legend>撤销 / 导出</legend>

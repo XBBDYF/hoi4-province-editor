@@ -227,6 +227,7 @@ const MapView = {
     { key: 'layers-state', name: '州', img: 'state', vis: false, op: 0.6 },
     { key: 'layers-edges', name: '边界', img: 'edges', vis: true, op: 0.85 },
     { key: 'layers-tgt', name: '细化目标', img: 'tgt', vis: true, op: 1 },
+    { key: 'layers-rail', name: '铁路', img: 'rail', vis: false, op: 1 },
     { key: 'layers-rivers', name: '河流', img: 'rivers', vis: false, op: 0.9 },
     { key: 'layers-links', name: '海峡/运河', img: 'links', vis: false, op: 1 },
   ],
@@ -334,12 +335,14 @@ function draw() {
     if (MapView.efill) ctx.drawImage(MapView.efill, x, y, dw, dh);
     if (MapView.tgtHL) ctx.drawImage(MapView.tgtHL, x, y, dw, dh);
     if (MapView.esel) ctx.drawImage(MapView.esel, x, y, dw, dh);
+    if (App.editLayer === 'rail') drawRails(ctx);
+    if (App.editLayer === 'terrain' && App.terrainCanvas) ctx.drawImage(App.terrainCanvas, x, y, dw, dh);
     const bm = edBorderData();
     if (bm) drawBorders(ctx, 0.95, bm);
     return;
   }
   for (const L of MapView.layers) {
-    if (L.img === 'edges' || L.img === 'tgt' || L.img === 'links') continue;   // 单独绘制
+    if (L.img === 'edges' || L.img === 'tgt' || L.img === 'links' || L.img === 'rail') continue;   // 单独绘制
     const im = MapView.imgs[L.img];
     if (!L.vis || !im || L.op <= 0) continue;
     ctx.globalAlpha = L.op;
@@ -357,6 +360,8 @@ function draw() {
   }
   const linkL = MapView.layers.find(l => l.img === 'links');
   if (linkL && linkL.vis && App.links && App.centers) drawLinks(ctx, linkL.op);
+  const railL = MapView.layers.find(l => l.img === 'rail');
+  if (railL && railL.vis && App.railData) { drawRails(ctx); }
   const borderL = MapView.layers.find(l => l.img === 'edges');
   if (borderL && borderL.vis && MapView.pid) drawBorders(ctx, borderL.op);
 }
@@ -478,7 +483,9 @@ function provinceAtWorld(wx, wy) {
 function setupMapEvents() {
   const area = $('#maparea'), c = MapView.canvas;
   clampCam();
+  const _uiHit = (e) => e.target && e.target.closest && e.target.closest('#layers,#maptools,#legend,#tgtBox,#tooltip');
   area.addEventListener('wheel', (e) => {
+    if (_uiHit(e)) return;
     e.preventDefault();
     const rect = c.getBoundingClientRect();
     zoomAt(e.clientX - rect.left, e.clientY - rect.top, e.deltaY < 0 ? 1.15 : 1 / 1.15);
@@ -486,7 +493,7 @@ function setupMapEvents() {
 
   let drag = null;
   area.addEventListener('mousedown', (e) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || _uiHit(e)) return;
     drag = { x: e.clientX, y: e.clientY, cx: MapView.cam.x, cy: MapView.cam.y, moved: false };
     area.classList.add('dragging');
   });
@@ -498,6 +505,7 @@ function setupMapEvents() {
       requestDraw();
       return;
     }
+    window._lastX = e.clientX; window._lastY = e.clientY;
     const rect = c.getBoundingClientRect();
     const w = screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
     updateHover(w, e.clientX, e.clientY);
@@ -1063,6 +1071,35 @@ async function edOnClick(pid, shift) {
   if (!MapView.inited) return;
   if (!App.idx) { setMsg('省份索引尚未就绪，请稍候…'); return; }
   const layer = App.editLayer;
+  if (layer === 'terrain') {
+    App.editSel = [pid]; App.sel = pid; renderEditSel(); edSelInfo(); buildESel();
+    const nm = (App.terrain && App.terrain.prov) ? App.terrain.prov[String(pid)] : '';
+    if ($('#terCur')) $('#terCur').textContent = '地块 #' + pid + ' 当前地形: ' + (nm || '(无)');
+    if (nm && $('#terSel')) $('#terSel').value = nm;
+    setMsg('已选地块 #' + pid + ' 地形 ' + (nm || '-'));
+    return;
+  }
+  if (layer === 'rail') {
+    const rect = MapView.canvas.getBoundingClientRect();
+    const w = screenToWorld((window._lastX || 0) - rect.left, (window._lastY || 0) - rect.top);
+    if (shift) {
+      if (App.editSel.length >= 2) App.editSel = [];
+      if (!App.editSel.includes(pid)) App.editSel.push(pid);
+      renderEditSel(); edSelInfo(); buildESel();
+      if (App.editSel.length === 2) {
+        await edRailCreate();
+        App.editSel = []; renderEditSel(); edSelInfo(); buildESel();
+      } else {
+        setMsg('已选 1 块，再 Shift 点第二块会自动创建铁路');
+      }
+      return;
+    }
+    const hit = railHit(w.x, w.y);
+    if (hit) { App.railSel = hit.i; if ($('#railLevel')) $('#railLevel').value = hit.level; if ($('#railInfo')) $('#railInfo').textContent = '铁路 #' + hit.i + ' 等级 ' + hit.level + '（' + hit.nodes.length + ' 节点）'; requestDraw(); setMsg('已选中铁路 等级=' + hit.level); return; }
+    const _hasSup = !!(App.railData && (App.railData.supplies || []).some(s => s.pid === pid));
+    await edSupToggleAt(pid, _hasSup ? 'remove' : 'add');
+    return;
+  }
   if (layer === 'prov') {
     if (shift) { if (!App.editSel.includes(pid)) App.editSel.push(pid); }
     else { App.editSel = [pid]; App.sel = pid; }
@@ -1108,6 +1145,7 @@ async function edOnClick(pid, shift) {
     App.editTarget = String(cur);
     edUpdateTargetUI(); edBuildTargetHL();
     if (layer === 'state') await edLoadStateData();
+    if (layer === 'sr') await edLoadSrData();
     setMsg('已选目标' + LAYER_CN[layer] + '：' + cur);
     return;
   }
@@ -1154,12 +1192,283 @@ async function edOnClick(pid, shift) {
 }
 
 
+
+/* ================= 全量记忆输入 ================= */
+function saveInputs() {
+  const o = {};
+  document.querySelectorAll('#topbar input,#topbar select,#side input,#side select,#side textarea').forEach(el => {
+    if (!el.id) return;
+    o[el.id] = (el.type === 'checkbox') ? el.checked : el.value;
+  });
+  try { localStorage.setItem('uiState', JSON.stringify(o)); } catch (e) { }
+}
+function loadInputs() {
+  let o = {};
+  try { o = JSON.parse(localStorage.getItem('uiState') || '{}'); } catch (e) { }
+  for (const k in o) {
+    const el = document.getElementById(k);
+    if (!el) continue;
+    if (el.type === 'checkbox') el.checked = !!o[k]; else el.value = o[k];
+  }
+}
+/* ================= 战略区数据 / 地块附加 ================= */
+
+/* ================= 铁路 / 补给 图层 ================= */
+function editParams() {
+  const v = (id) => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
+  return { mod_dir: v('modDir'), game_dir: v('gameDir'), out_dir: v('outDir'),
+    game_merge: (document.getElementById('cfg_game_merge') && document.getElementById('cfg_game_merge').checked) ? 1 : 0,
+    ref: (document.getElementById('edRef') ? document.getElementById('edRef').value : 'mod') };
+}
+
+/* ================= 地块地形 ================= */
+async function edLoadTerrainData() {
+  try {
+    const r = await fetch('/api/edit/terrain_data?' + new URLSearchParams(editParams()).toString()).then(r => r.json());
+    if (!r.ok) { setMsg('读取地形失败: ' + r.error); return; }
+    App.terrain = r.data || { defs: {}, prov: {}, names: [] };
+    if ($('#terSel')) $('#terSel').innerHTML = (App.terrain.names || []).map(n => `<option>${n}</option>`).join('');
+    if ($('#terInfo')) $('#terInfo').textContent = '陆地 ' + Object.keys(App.terrain.prov || {}).length + ' 块 · 与 definition 一致 ' + (App.terrain.agree || 0) + '/' + (App.terrain.total || 0);
+    _buildTerrainOverlay();
+    requestDraw();
+  } catch (e) { setMsg('读取地形失败: ' + e.message); }
+}
+function _buildTerrainOverlay() {
+  if (!MapView.pid || !App.terrain || !App.terrain.defs) return;
+  const W = MapView.pidW, H = MapView.pidH, d = MapView.pid;
+  const defs = App.terrain.defs, prov = App.terrain.prov || {};
+  const cache = new Map();
+  const colOf = (pid) => {
+    let c = cache.get(pid);
+    if (c !== undefined) return c;
+    const nm = prov[String(pid)];
+    const rgb = nm && defs[nm];
+    c = rgb ? rgb : null; cache.set(pid, c); return c;
+  };
+  const oc = document.createElement('canvas'); oc.width = W; oc.height = H;
+  const octx = oc.getContext('2d'); const img = octx.createImageData(W, H); const o = img.data;
+  for (let p = 0, i = 0; p < W * H; p++, i += 4) {
+    const pid = d[i] | (d[i + 1] << 8) | (d[i + 2] << 16);
+    const c = pid ? colOf(pid) : null;
+    if (c) { o[i] = c[0]; o[i + 1] = c[1]; o[i + 2] = c[2]; o[i + 3] = 255; }
+    else { o[i] = 20; o[i + 1] = 22; o[i + 2] = 26; o[i + 3] = 255; }
+  }
+  octx.putImageData(img, 0, 0);
+  App.terrainCanvas = oc;
+}
+async function edTerrainSave() {
+  if (!App.editSel.length) { setMsg('先在“地块地形”图层点一个地块'); return; }
+  const pid = App.editSel[0], nm = $('#terSel') ? $('#terSel').value : '';
+  if (!nm) { setMsg('先选地形'); return; }
+  const r = await editPost('/api/edit/assign', { level: 'terrain', pid, target: nm, op: 'set' });
+  if (r.ok) { if (App.terrain && App.terrain.prov) App.terrain.prov[String(pid)] = nm; _buildTerrainOverlay(); showEditOps(r.status); setMsg('#' + pid + ' 地形 → ' + nm); }
+  else setMsg('失败: ' + r.error);
+}
+async function edTerrainExport() {
+  const r = await editPost('/api/edit/export_terrain', {});
+  if (r.ok) { setMsg('已导出 terrain.bmp: ' + (r.result && r.result.path)); alert('已生成并导出：\n' + ((r.result && r.result.path) || '')); }
+  else setMsg('导出失败: ' + r.error);
+}
+async function edTerrainAuto() {
+  if (!confirm('用 terrain.bmp 自动生成所有陆地地块的地形（会覆盖 definition.csv 的地形列）？')) return;
+  const r = await editPost('/api/edit/terrain_auto', {});
+  if (r.ok) { showEditOps(r.status); await edLoadTerrainData(); setMsg('已自动生成地形：' + (r.count || '') + ' 块'); }
+  else setMsg('失败: ' + r.error);
+}
+
+async function edLoadRailData() {
+  try {
+    const r = await fetch('/api/edit/rail_data?' + new URLSearchParams(editParams()).toString()).then(r => r.json());
+    if (!r.ok) { setMsg('读取铁路失败: ' + r.error); return; }
+    App.railData = r.data || { rails: [], supplies: [], edges: [], land: [] };
+    App.railLand = new Set(((App.railData.land) || []).map(Number));
+    if ($('#railStat')) $('#railStat').textContent = App.railData.rails.length + ' 条铁路 · ' + App.railData.supplies.length + ' 个补给站';
+    requestDraw();
+  } catch (e) { setMsg('读取铁路失败: ' + e.message); }
+}
+function _lvColor(l) {
+  return ['#e0a53c', '#e0a53c', '#7ac06a', '#5aa9e6', '#c07ae0', '#e06c6c'][Math.min(Math.max(l, 0), 6)];
+}
+function _drawAdjEdges(ctx) {
+  const E = (App.railData && App.railData.edges) || [];
+  if (!E.length) return;
+  const C = App.centers;
+  const { s, x, y } = MapView.cam;
+  const st = { strait: ['#33d6ff', [7, 5]], canal: ['#ffd23f', [3, 4]], impassable: ['#ff4d4d', [2, 7]] };
+  ctx.save(); ctx.lineWidth = 1.8; ctx.lineCap = 'round';
+  for (const e of E) {
+    const a = C[String(e.a)], b = C[String(e.b)];
+    if (!a || !b) continue;
+    const stl = st[e.type] || ['#9aa0a6', [3, 3]];
+    ctx.setLineDash(stl[1]); ctx.strokeStyle = stl[0];
+    ctx.beginPath();
+    ctx.moveTo(x + a[0] * s, y + a[1] * s);
+    ctx.lineTo(x + b[0] * s, y + b[1] * s);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawRails(ctx) {
+  if (!App.railData || !App.centers) return;
+  _drawAdjEdges(ctx);
+  const { s, x, y } = MapView.cam, C = App.centers;
+  const area = $('#maparea');
+  const pad = 60 / s;
+  const vx0 = (-x) / s - pad, vy0 = (-y) / s - pad;
+  const vx1 = (area.clientWidth - x) / s + pad, vy1 = (area.clientHeight - y) / s + pad;
+  ctx.save();
+  ctx.lineCap = 'round';
+  let drawn = 0;
+  for (const rl of App.railData.rails) {
+    let bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
+    for (const n of rl.nodes) { const c = C[String(n)]; if (!c) continue;
+      if (c[0] < bx0) bx0 = c[0]; if (c[0] > bx1) bx1 = c[0];
+      if (c[1] < by0) by0 = c[1]; if (c[1] > by1) by1 = c[1]; }
+    if (bx1 < vx0 || bx0 > vx1 || by1 < vy0 || by0 > vy1) continue;   // 视野外跳过
+    if (++drawn > 900) break;
+    const sel = (App.railSel === rl.i);
+    ctx.strokeStyle = sel ? '#ffffff' : _lvColor(rl.level);
+    ctx.lineWidth = sel ? 3.2 : (1.2 + 0.5 * rl.level);
+    ctx.beginPath();
+    let first = true;
+    for (const n of rl.nodes) {
+      const c = C[String(n)];
+      if (!c) { first = true; continue; }
+      const px = x + c[0] * s, py = y + c[1] * s;
+      if (first) { ctx.moveTo(px, py); first = false; } else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#f2d27a';
+  for (const sp of App.railData.supplies) {
+    const c = C[String(sp.pid)]; if (!c) continue;
+    if (c[0] < vx0 || c[0] > vx1 || c[1] < vy0 || c[1] > vy1) continue;
+    const px = x + c[0] * s, py = y + c[1] * s;
+    ctx.beginPath(); ctx.arc(px, py, 3.2, 0, 6.2832); ctx.fill();
+    ctx.strokeStyle = '#5a4a20'; ctx.lineWidth = 1; ctx.stroke();
+  }
+  ctx.restore();
+  if ($('#railStat')) $('#railStat').textContent = drawn + ' 条铁路(视野内) · ' + App.railData.supplies.length + ' 个补给站';
+}
+function railHit(wx, wy) {
+  if (!App.railData || !App.centers) return null;
+  const C = App.centers;
+  const tol = 8 / MapView.cam.s;
+  let best = null, bestD = tol;
+  for (const rl of App.railData.rails) {
+    let prev = null;
+    for (const n of rl.nodes) {
+      const c = C[String(n)];
+      if (!c) { prev = null; continue; }
+      if (prev) {
+        const x1 = prev[0], y1 = prev[1], x2 = c[0], y2 = c[1];
+        const dx = x2 - x1, dy = y2 - y1, L2 = dx * dx + dy * dy;
+        let t = L2 > 0 ? ((wx - x1) * dx + (wy - y1) * dy) / L2 : 0;
+        t = Math.max(0, Math.min(1, t));
+        const px = x1 + t * dx, py = y1 + t * dy;
+        const d = Math.hypot(wx - px, wy - py);
+        if (d < bestD) { bestD = d; best = rl; }
+      }
+      prev = c;
+    }
+  }
+  return best;
+}
+async function edRailLevelSave() {
+  if (App.railSel == null) { setMsg('先点击地图上的铁路选中它'); return; }
+  const r = await editPost('/api/edit/rail_level', { i: App.railSel, level: Number($('#railLevel').value || 1) });
+  if (r.ok) { showEditOps(r.status); await edLoadRailData(); setMsg('铁路等级已保存'); } else setMsg('失败: ' + r.error);
+}
+async function edRailDel() {
+  if (App.railSel == null) { setMsg('先选中铁路'); return; }
+  const r = await editPost('/api/edit/rail_rm', { i: App.railSel });
+  if (r.ok) { App.railSel = null; showEditOps(r.status); await edLoadRailData(); setMsg('铁路已删除'); } else setMsg('失败: ' + r.error);
+}
+async function edRailCreate() {
+  if (App.railLand && App.railLand.size && App.editSel.some(p => !App.railLand.has(Number(p)))) {
+    setMsg('海上/湖泊地块不能放铁路（只能选陆地）'); return;
+  }
+  if (App.editSel.length < 2) { setMsg('先在铁路图层点两个地块（第二个 Shift 点）'); return; }
+  const lv = Number(($('#railNewLevel') ? $('#railNewLevel').value : 0) || 1);
+  const r = await editPost('/api/edit/rail', { a: App.editSel[0], b: App.editSel[1], op: 'add', level: lv });
+  if (r.ok) { showEditOps(r.status); await edLoadRailData(); setMsg('已新建铁路（等级 ' + lv + '）'); } else setMsg('失败: ' + r.error);
+}
+async function edSupToggleAt(pid, op) {
+  if (op === 'add' && App.railLand && App.railLand.size && !App.railLand.has(Number(pid))) {
+    setMsg('海上/湖泊地块不能放补给中心（只能选陆地）'); return;
+  }
+  const r = await editPost('/api/edit/supply', { pid, op });
+  if (r.ok) { showEditOps(r.status); await edLoadRailData(); setMsg(op === 'add' ? ('#' + pid + ' 加了补给站') : ('#' + pid + ' 删了补给站')); }
+  else setMsg('失败: ' + r.error);
+}
+
+async function edSupToggle(op) {
+  if (!App.editSel.length) { setMsg('先点一个地块'); return; }
+  const r = await editPost('/api/edit/supply', { pid: App.editSel[0], op });
+  if (r.ok) { showEditOps(r.status); await edLoadRailData(); setMsg(op === 'add' ? '已加补给站' : '已删补给站'); } else setMsg('失败: ' + r.error);
+}
+
+async function edLoadSrData() {
+  if (App.editLayer !== 'sr' || !App.editTarget) { const e = $('#srCur'); if (e) e.textContent = '未选择战略区'; return; }
+  try {
+    const r = await fetch('/api/edit/sr_data?' + new URLSearchParams(Object.assign(editParams(), { file: App.editTarget })).toString()).then(r => r.json());
+    if (!r.ok) { setMsg('读取战略区失败: ' + r.error); if ($('#srCur')) $('#srCur').textContent = '读取失败: ' + r.error; return; }
+    const d = r.data || {};
+    if ($('#srCur')) $('#srCur').textContent = '当前战略区: ' + d.file;
+    if ($('#srName')) $('#srName').value = d.name || '';
+    if ($('#srWeather')) $('#srWeather').value = d.weather || '';
+    if ($('#srProv')) $('#srProv').textContent = d.provinces + ' 个地块';
+  } catch (e) { setMsg('读取战略区失败: ' + e.message); }
+}
+async function edSaveSrData() {
+  if (App.editLayer !== 'sr' || !App.editTarget) { setMsg('先选中一个战略区'); return; }
+  const r = await editPost('/api/edit/set_sr', { file: App.editTarget, name: $('#srName').value.trim(), weather: $('#srWeather').value });
+  if (r.ok) { showEditOps(r.status); setMsg('已保存战略区数据: ' + App.editTarget); }
+  else setMsg('保存失败: ' + r.error);
+}
+async function edExtra(kind, op) {
+  if (kind === 'rail') {
+    if (App.editSel.length < 2) { setMsg('先选 2 个地块（点一个再 Shift 点另一个）'); return; }
+    const r = await editPost('/api/edit/rail', { a: App.editSel[0], b: App.editSel[1], op });
+    if (r.ok) { showEditOps(r.status); setMsg(op === 'add' ? '已连铁路' : '已断铁路'); } else setMsg('失败: ' + r.error);
+    return;
+  }
+  if (!App.editSel.length) { setMsg('先选一个地块'); return; }
+  const pid = App.editSel[0];
+  if (kind === 'supply') {
+    const r = await editPost('/api/edit/supply', { pid, op });
+    if (r.ok) { showEditOps(r.status); setMsg(op === 'add' ? '已加补给站' : '已删补给站'); } else setMsg('失败: ' + r.error);
+    return;
+  }
+  if (kind === 'building') {
+    const key = $('#edBldKey') ? $('#edBldKey').value : '';
+    if (!key) { setMsg('先选建筑类型'); return; }
+    const cen = App.centers && App.centers[String(pid)];
+    const wx = cen ? cen[0] * (App.meta ? App.meta.width / App.meta.disp_width : 2) : 0;
+    const wy = cen ? cen[1] * (App.meta ? App.meta.height / App.meta.disp_height : 2) : 0;
+    const r = await editPost('/api/edit/building', { pid, key, wx, wy, op });
+    if (r.ok) { showEditOps(r.status); setMsg('已加建筑 ' + key + ' @#' + pid); } else setMsg('失败: ' + r.error);
+  }
+}
+function edSyncPanels() {
+  const L = App.editLayer;
+  if ($('#fsState')) $('#fsState').style.display = (L === 'state') ? '' : 'none';
+  if ($('#fsSr')) $('#fsSr').style.display = (L === 'sr') ? '' : 'none';
+  if ($('#fsExtra')) $('#fsExtra').style.display = (L === 'prov' || L === 'state') ? '' : 'none';
+  if ($('#fsRail')) $('#fsRail').style.display = (L === 'rail') ? '' : 'none';
+  if ($('#fsNewSr')) $('#fsNewSr').style.display = (L === 'sr') ? '' : 'none';
+  if ($('#fsProv')) $('#fsProv').style.display = (L === 'prov') ? '' : 'none';
+  if ($('#fsTerrain')) $('#fsTerrain').style.display = (L === 'terrain') ? '' : 'none';
+  if (L === 'terrain' && !App.terrain) edLoadTerrainData();
+  if (L === 'sr') edLoadSrData();
+  if (L === 'rail') edLoadRailData();
+}
+
 async function edLoadStateData() {
   if (App.editLayer !== 'state' || !App.editTarget) { if ($('#nsCur')) $('#nsCur').textContent = '未选择州'; if ($('#nsEditId')) $('#nsEditId').value = ''; return; }
   try {
-    const q = new URLSearchParams(Object.assign(collectCfg(), { file: App.editTarget }));
-    const r = await fetch('/api/edit/state_data?' + q.toString()).then(r => r.json());
-    if (!r.ok) { setMsg('读取州数据失败: ' + r.error); return; }
+    const r = await fetch('/api/edit/state_data?' + new URLSearchParams(Object.assign(editParams(), { file: App.editTarget })).toString()).then(r => r.json());
+    if (!r.ok) { setMsg('读取州数据失败: ' + r.error); if ($('#nsCur')) $('#nsCur').textContent = '读取失败: ' + r.error; return; }
     const d = r.data || {};
     if ($('#nsCur')) $('#nsCur').textContent = '当前州: ' + d.file;
     if ($('#nsEditId')) $('#nsEditId').value = d.id;
@@ -1236,6 +1545,7 @@ function edFillBuildings() {
       if (!r.ok) return;
       const sel = $('#nsBuilding'); if (!sel) return;
       App.nsAssets = r.assets;
+      if ($('#edBldKey')) $('#edBldKey').innerHTML = (r.assets.buildings || []).map(b => `<option>${b}</option>`).join('');
       sel.innerHTML = (r.assets.buildings || []).map(b => `<option>${b}</option>`).join('');
       const tl = $('#nsTerrain'); // optional
     }).catch(() => { });
@@ -1591,8 +1901,14 @@ async function boot(reload) {
   } else {
     MapView.imgs = {}; MapView.pid = null; MapView.hl = null; MapView.tgt = null; MapView.tgtIds = null; MapView.inited = false;
     MapView.layerMaps = {}; MapView.efill = null; MapView.efctx = null; MapView.efimg = null; MapView.tgtHL = null; MapView.esel = null;
+    App.terrain = null; App.terrainCanvas = null; App.railData = null; App.railSel = null;
     App.newEnc = {}; App.newEncNext = 20000; App.ovState = {}; App.ovSr = {}; App.ovCont = {}; App.mergedOut = {};
   }
+  loadInputs();
+  if (typeof edLoadRailData === 'function') edLoadRailData();
+  document.addEventListener('change', saveInputs);
+  document.addEventListener('input', saveInputs);
+  edSyncPanels();
   const st = await refreshState();
   if (!st.cache_exists) {
     $('#mapInfo').innerHTML = '尚未构建缓存。点击右上角 <b>构建/刷新缓存</b> 生成地图图层。';
@@ -1602,7 +1918,12 @@ async function boot(reload) {
   if (!MapView.canvas) { MapView.canvas = $('#map'); MapView.ctx = MapView.canvas.getContext('2d', { willReadFrequently: true }); }
   await initMap();
   await loadIndex();
-  if (App.editMode) { await edLoadLayerMaps(); await editRefresh(); }
+  if (App.editMode) {
+    await edLoadLayerMaps(); await editRefresh();
+    edSyncPanels();
+    if (App.editLayer === 'terrain') await edLoadTerrainData();
+    if (App.editLayer === 'rail') await edLoadRailData();
+  }
   setMsg('就绪');
 }
 
@@ -1664,6 +1985,7 @@ function initUI() {
     App.editLayer = el.value;
     App.editTarget = null; MapView.tgtHL = null; edUpdateTargetUI();
     if (!App.editMode) { $('#editMode').checked = true; $('#editMode').onchange(); }
+    edSyncPanels();
     edLoadLayerMaps().then(() => { edReplay((App.editOps && App.editOps.ops) || []); });
     setMsg('图层: ' + el.options[el.selectedIndex].text);
   };
@@ -1681,6 +2003,19 @@ function initUI() {
   if ($('#edNewStateCreate')) $('#edNewStateCreate').onclick = edCreateNewState;
   if ($('#edNewSrCreate')) $('#edNewSrCreate').onclick = edCreateNewSr;
   if ($('#nsSave')) $('#nsSave').onclick = edSaveStateData;
+  if ($('#srSave')) $('#srSave').onclick = edSaveSrData;
+  if ($('#edRailOn')) $('#edRailOn').onclick = () => edExtra('rail', 'add');
+  if ($('#edRailOff')) $('#edRailOff').onclick = () => edExtra('rail', 'remove');
+  if ($('#railLevelSave')) $('#railLevelSave').onclick = edRailLevelSave;
+  if ($('#railDel')) $('#railDel').onclick = edRailDel;
+  if ($('#railCreate')) $('#railCreate').onclick = edRailCreate;
+  if ($('#terSave')) $('#terSave').onclick = edTerrainSave;
+  if ($('#terAuto')) $('#terAuto').onclick = edTerrainAuto;
+  if ($('#terExport')) $('#terExport').onclick = edTerrainExport;
+  if ($('#railClearSel')) $('#railClearSel').onclick = () => { App.editSel = []; renderEditSel(); edSelInfo(); buildESel(); setMsg('已取消选中'); };
+  if ($('#edSupOn')) $('#edSupOn').onclick = () => edExtra('supply', 'add');
+  if ($('#edSupOff')) $('#edSupOff').onclick = () => edExtra('supply', 'remove');
+  if ($('#edBldAdd')) $('#edBldAdd').onclick = () => edExtra('building', 'add');
   if ($('#edRef')) $('#edRef').onchange = () => {
     MapView.layerMaps = {}; App.newEnc = {}; App.newEncNext = 20000;
     setMsg('参考切换到 ' + $('#edRef').value + '，正在重建缓存…');
