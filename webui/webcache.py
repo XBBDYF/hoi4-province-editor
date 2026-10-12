@@ -51,19 +51,17 @@ def pal(n: int):
     return out
 
 
-def _resolve(mod, game, *parts):
+def _resolve(mod, game, *parts, overlay=""):
     rel = os.path.join(*parts)
-    m = os.path.join(mod, rel)
-    if os.path.exists(m):
-        return m
-    if game:
-        g = os.path.join(game, rel)
-        if os.path.exists(g):
-            return g
-    return m
+    for root in (overlay, mod, game):
+        if root:
+            p = os.path.join(root, rel)
+            if os.path.exists(p):
+                return p
+    return os.path.join(mod, rel) if mod else ""
 
 
-def _list_merged(mod, game, *parts, merge=False):
+def _list_merged(mod, game, *parts, merge=False, overlay=""):
     rel = os.path.join(*parts)
 
     def one(root):
@@ -74,38 +72,44 @@ def _list_merged(mod, game, *parts, merge=False):
             return []
         return [os.path.join(d, f) for f in sorted(os.listdir(d)) if f.lower().endswith(".txt")]
 
-    mod_files = one(mod)
-    if mod_files and not merge:
-        return mod_files
-    if not merge:
-        return one(game)
     names = set()
     out = []
-    for root in (mod, game):
+    for root in (overlay, mod):           # overlay 覆盖 mod
         for fp in one(root):
             name = os.path.basename(fp)
             if name in names:
                 continue
             names.add(name)
             out.append(fp)
+    if out and not merge:
+        return out
+    for fp in one(game):                  # 再补原版
+        name = os.path.basename(fp)
+        if name in names:
+            continue
+        names.add(name)
+        out.append(fp)
     return out
 
 
 def build(mod: str, out: str, progress=None, disp_max_w: int = 2816, game_dir: str = "",
-          game_merge: bool = False):
+          game_merge: bool = False, overlay_dir: str = ""):
     def log(m):
         if progress:
             progress(str(m))
 
     mod = os.path.abspath(mod)
     game = os.path.abspath(game_dir) if game_dir else ""
+    ovl = os.path.abspath(overlay_dir) if overlay_dir else ""
+    if ovl and not os.path.isdir(ovl):
+        ovl = ""
     os.makedirs(out, exist_ok=True)
     mdir = _resolve(mod, game, "map")
 
     # ---- definition.csv ----
     log("读取 definition.csv ...")
     recs = {}
-    for line in open(_resolve(mod, game, "map", "definition.csv"), encoding="utf-8-sig", errors="replace"):
+    for line in open(_resolve(mod, game, "map", "definition.csv", overlay=ovl), encoding="utf-8-sig", errors="replace"):
         p = line.strip().split(";")
         if len(p) >= 8 and p[0].isdigit():
             recs[int(p[0])] = p
@@ -113,7 +117,7 @@ def build(mod: str, out: str, progress=None, disp_max_w: int = 2816, game_dir: s
 
     # ---- provinces.bmp -> 省份ID图 ----
     log("读取 provinces.bmp 并解码省份ID ...")
-    arr = np.asarray(Image.open(_resolve(mod, game, "map", "provinces.bmp")).convert("RGB")).astype(np.int64)
+    arr = np.asarray(Image.open(_resolve(mod, game, "map", "provinces.bmp", overlay=ovl)).convert("RGB")).astype(np.int64)
     h, w = arr.shape[:2]
     lut = np.zeros(1 << 24, dtype=np.int32)
     for pid, r in recs.items():
@@ -133,7 +137,7 @@ def build(mod: str, out: str, progress=None, disp_max_w: int = 2816, game_dir: s
     pid_d = pid[::step, ::step]
 
     # 地形底图 (colormap DDS)
-    dds = _resolve(mod, game, "map", "terrain", "colormap_rgb_cityemissivemask_a.dds")
+    dds = _resolve(mod, game, "map", "terrain", "colormap_rgb_cityemissivemask_a.dds", overlay=ovl)
     if os.path.isfile(dds):
         log("从 colormap DDS 解出地形底图 ...")
         raw = open(dds, "rb").read()
@@ -148,7 +152,7 @@ def build(mod: str, out: str, progress=None, disp_max_w: int = 2816, game_dir: s
         del bimg
     else:
         log("未找到 colormap, 用 provinces.bmp 缩放为底图 ...")
-        src = Image.open(_resolve(mod, game, "map", "provinces.bmp")).convert("RGB")
+        src = Image.open(_resolve(mod, game, "map", "provinces.bmp", overlay=ovl)).convert("RGB")
         src = src.resize((dw, dh), Image.BILINEAR)
         src.save(os.path.join(out, "base_map.png"))
 
@@ -180,7 +184,7 @@ def build(mod: str, out: str, progress=None, disp_max_w: int = 2816, game_dir: s
     def scan(sub):
         owner = {}
         names = []
-        for fp in _list_merged(mod, game, sub, merge=game_merge):
+        for fp in _list_merged(mod, game, sub, merge=game_merge, overlay=ovl):
             m = PROV_RE.search(read_text(fp))
             if not m:
                 continue
@@ -196,7 +200,7 @@ def build(mod: str, out: str, progress=None, disp_max_w: int = 2816, game_dir: s
     st_owner, st_names = scan(os.path.join("history", "states"))
 
     cont_names = []
-    cp = _resolve(mod, game, "map", "continent.txt")
+    cp = _resolve(mod, game, "map", "continent.txt", overlay=ovl)
     if os.path.isfile(cp):
         m = re.search(r"continents\s*=\s*\{(.*?)\}", read_text(cp), re.DOTALL)
         if m:
@@ -221,8 +225,8 @@ def build(mod: str, out: str, progress=None, disp_max_w: int = 2816, game_dir: s
         return idx
 
     log("生成 战略区 / 州 / 大洲 着色层 ...")
-    overlay(sr_owner, len(sr_names), "sr")
-    overlay(st_owner, len(st_names), "state")
+    sr_idx = overlay(sr_owner, len(sr_names), "sr")
+    st_idx = overlay(st_owner, len(st_names), "state")
 
     # HOI4 大洲ID从 1 开始 (1=anglia)。0/负数表示海洋/湖泊 -> 不着色。
     cidx_of = {}
@@ -242,6 +246,100 @@ def build(mod: str, out: str, progress=None, disp_max_w: int = 2816, game_dir: s
     csel = ci >= 0
     cimg[csel] = cpal[np.clip(ci[csel], 0, len(cont_names) - 1)]
     Image.fromarray(cimg, "RGB").save(os.path.join(out, "overlay_continent.png"))
+
+    # ---- 编辑图层用 ID 图 (编码 index+1; 0=未分配) ----
+    def _enc_idx(arr):
+        v = np.where(arr < 0, 0, arr + 1).astype(np.int64)
+        return np.stack([v & 255, (v >> 8) & 255, (v >> 16) & 255], -1).astype(np.uint8)
+
+    def _overlay_rgba(idx, n, name, mask=None):
+        out_img = np.zeros((dh, dw, 4), np.uint8)
+        palette = np.array(pal(max(n, 1)), np.uint8)
+        sel = idx >= 0
+        if mask is not None:
+            sel = sel & mask
+        out_img[sel, :3] = palette[np.clip(idx[sel], 0, len(palette) - 1)]
+        out_img[sel, 3] = 255
+        Image.fromarray(out_img, "RGBA").save(os.path.join(out, "overlay_%s_a.png" % name))
+
+    # 陆地/湖泊掩码: 图层叠加只盖陆地; 海洋在上层保持地块色
+    landlut = np.zeros(maxid + 2, dtype=bool)
+    for _p, _r in recs.items():
+        if _p <= maxid and _r[4] in ("land", "lake"):
+            landlut[_p] = True
+    land_mask = landlut[np.clip(pid_d, 0, maxid + 1)]
+    _overlay_rgba(sr_idx, len(sr_names), "sr", mask=land_mask)
+    _overlay_rgba(st_idx, len(st_names), "state", mask=land_mask)
+    _overlay_rgba(ci, len(cont_names), "continent", mask=land_mask)
+
+    Image.fromarray(_enc_idx(sr_idx), "RGB").save(os.path.join(out, "layer_sr.png"))
+    Image.fromarray(_enc_idx(st_idx), "RGB").save(os.path.join(out, "layer_state.png"))
+    Image.fromarray(_enc_idx(ci), "RGB").save(os.path.join(out, "layer_continent.png"))
+
+    # ---- 河流层 (rivers.bmp -> RGBA) ----
+    rp = _resolve(mod, game, "map", "rivers.bmp", overlay=ovl)
+    if os.path.isfile(rp):
+        try:
+            log("生成河流层 ...")
+            rim = Image.open(rp)
+            if rim.mode == "P":
+                rd = np.asarray(rim)[::step, ::step]
+                rgba = np.zeros((dh, dw, 4), np.uint8)
+
+                def _paint(mask, rgb, a=235):
+                    rgba[mask] = (rgb[0], rgb[1], rgb[2], a)
+
+                _paint(rd == 0, (0, 255, 0), 235)          # 源头
+                _paint(rd == 1, (255, 90, 0), 235)         # 流入
+                _paint(rd == 2, (255, 255, 0), 235)        # 流出
+                _paint((rd >= 3) & (rd <= 6), (0, 215, 255), 225)   # 小河流
+                _paint((rd >= 7) & (rd <= 11), (0, 80, 255), 240)   # 大河流
+                Image.fromarray(rgba, "RGBA").save(os.path.join(out, "overlay_rivers.png"))
+                del rd, rgba
+            else:
+                log("rivers.bmp 不是索引图, 跳过河流层")
+        except Exception as _e:
+            log("河流层生成失败: %s" % _e)
+
+    # ---- 省份中心 + 海峡/运河连线 ----
+    log("计算省份中心并解析连线 ...")
+    try:
+        ys_d, xs_d = np.nonzero(pid_d)
+        ids_d = pid_d[ys_d, xs_d].astype(np.int64)
+        md = int(pid_d.max())
+        cnt = np.bincount(ids_d, minlength=md + 1)
+        sx = np.bincount(ids_d, weights=xs_d.astype(np.float64), minlength=md + 1)
+        sy = np.bincount(ids_d, weights=ys_d.astype(np.float64), minlength=md + 1)
+        centers = {}
+        for i in range(1, md + 1):
+            if cnt[i] > 0 and i in recs:
+                centers[str(i)] = [round(float(sx[i] / cnt[i]), 1), round(float(sy[i] / cnt[i]), 1)]
+        json.dump(centers, open(os.path.join(out, "prov_centers.json"), "w", encoding="utf-8"),
+                  ensure_ascii=False, separators=(",", ":"))
+    except Exception as _e:
+        log("省份中心失败: %s" % _e)
+
+    ln_p = _resolve(mod, game, "map", "adjacencies.csv", overlay=ovl)
+    links = []
+    if os.path.isfile(ln_p):
+        try:
+            for i, ln in enumerate(open(ln_p, encoding="utf-8-sig", errors="replace")):
+                c = ln.rstrip("\r\n").split(";")
+                if i == 0 or len(c) < 4 or not c[0].strip().lstrip("-").isdigit():
+                    continue
+                try:
+                    f = int(c[0]); t = int(c[1])
+                except ValueError:
+                    continue
+                th = int(c[3]) if c[3].strip().lstrip("-").isdigit() else -1
+                rule = (c[8].strip() if len(c) > 8 else "")
+                cmt = (c[9].strip() if len(c) > 9 else "")
+                links.append({"f": f, "t": t, "th": th, "type": c[2].strip(), "rule": rule,
+                              "canal": ("canal" in rule.lower()) or ("canal" in cmt.lower())})
+        except Exception as _e:
+            log("连线解析失败: %s" % _e)
+    json.dump(links, open(os.path.join(out, "links.json"), "w", encoding="utf-8"),
+              ensure_ascii=False, separators=(",", ":"))
 
     # ---- prov_index.json ----
     log("统计面积并生成 prov_index.json ...")

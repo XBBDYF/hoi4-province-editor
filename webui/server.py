@@ -57,6 +57,47 @@ app = Flask(__name__, static_folder=os.path.join(HERE, "static"), static_url_pat
 TASKS: dict = {}
 TASK_LOCK = threading.Lock()
 
+EDIT = {"ed": None, "lock": threading.Lock()}
+
+
+def _normkey(p):
+    return os.path.normcase(os.path.abspath(p)) if p else ""
+
+
+def _get_editor(mod, game, gmerge, ref=""):
+    want_mod = _normkey(mod)
+    want_game = _normkey(game)
+    want_ref = _normkey(ref)
+    with EDIT["lock"]:
+        ed = EDIT["ed"]
+        if (ed is None or _normkey(ed.mod) != want_mod
+                or _normkey(ed.game) != want_game or ed.merge != bool(gmerge)
+                or _normkey(getattr(ed, "ref", "")) != want_ref):
+            import editor as _ed
+            ed = _ed.Editor(mod, game, gmerge, ref_dir=ref)
+            EDIT["ed"] = ed
+        return ed
+
+
+def _src_mod(d):
+    """返回 (实际源目录, game目录)。mod_dir 给了空串 => 只加载原版。"""
+    game = str(d.get("game_dir") or DEFAULT_GAME).strip()
+    mod = str(d.get("mod_dir") or "").strip()
+    return (mod or game), game
+
+
+def _as_bool(v):
+    if isinstance(v, bool):
+        return v
+    return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _edit_params(d):
+    mod, game = _src_mod(d)
+    gmerge = _as_bool(d.get("game_merge", False))
+    ref = str(d.get("out_dir") or DEFAULT_OUT) if str(d.get("ref") or "mod") == "output" else ""
+    return _get_editor(mod, game, gmerge, ref)
+
 
 def new_task(kind: str) -> str:
     tid = uuid.uuid4().hex[:12]
@@ -132,10 +173,14 @@ def parse_parts(s):
 
 def build_config(d: dict, dry: bool) -> Config:
     g = d.get
+    _game = str(g("game_dir") or DEFAULT_GAME).strip()
+    _mod = str(g("mod_dir") or "").strip()
     cfg = Config(
-        mod_dir=str(g("mod_dir") or DEFAULT_MOD).strip(),
-        game_dir=str(g("game_dir") or DEFAULT_GAME).strip(),
+        mod_dir=(_mod or _game),
+
+        game_dir=_game,
         game_merge=bool(g("game_merge", False)),
+        clean_output=bool(g("clean_output", True)),
         out_dir=str(g("out_dir") or DEFAULT_OUT).strip(),
         in_place=bool(g("in_place", False)),
         threshold=int(g("threshold", 200) or 0),
@@ -240,9 +285,9 @@ def api_defaults():
 
 @app.route("/api/state")
 def api_state():
-    mod = request.args.get("mod") or DEFAULT_MOD
-    out = request.args.get("out") or DEFAULT_OUT
     game = request.args.get("game") or DEFAULT_GAME
+    mod = (request.args.get("mod") or "").strip() or game
+    out = request.args.get("out") or DEFAULT_OUT
     info = {
         "mod_dir": mod, "out_dir": out, "game_dir": game,
         "mod_exists": os.path.isdir(os.path.join(mod, "map")),
@@ -281,15 +326,15 @@ def api_state():
 @app.route("/api/cache/build", methods=["POST"])
 def api_cache_build():
     d = request.get_json(force=True, silent=True) or {}
-    mod = str(d.get("mod_dir") or DEFAULT_MOD)
-    game = str(d.get("game_dir") or DEFAULT_GAME)
-    gmerge = bool(d.get("game_merge", False))
+    mod, game = _src_mod(d)
+    gmerge = _as_bool(d.get("game_merge", False))
+    ref = str(d.get("out_dir") or DEFAULT_OUT) if str(d.get("ref") or "mod") == "output" else ""
 
     def work(tid):
         try:
             from webcache import build
             res = build(mod, CACHE_DIR, progress=lambda m: task_log(tid, m), game_dir=game,
-                        game_merge=gmerge)
+                        game_merge=gmerge, overlay_dir=ref)
             task_finish(tid, result=res)
         except Exception:
             task_finish(tid, error=traceback.format_exc())
@@ -453,6 +498,230 @@ def api_openout():
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
     return jsonify({"ok": False, "error": "目录不存在"})
+
+
+# --------------------------------------------------------------------------- #
+# 编辑 (合并/删除/改归属/大洲 + 撤销重做 + 导出)
+# --------------------------------------------------------------------------- #
+def _edit_ok(ed, extra=None):
+    r = {"ok": True, "status": ed.status()}
+    if extra:
+        r.update(extra)
+    return jsonify(r)
+
+
+@app.route("/api/edit/status")
+def api_edit_status():
+    d = dict(request.args)
+    try:
+        ed = _edit_params(d)
+        return _edit_ok(ed)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/merge", methods=["POST"])
+def api_edit_merge():
+    d = request.get_json(force=True, silent=True) or {}
+    try:
+        ed = _edit_params(d)
+        ed.do_merge(int(d.get("into")), [int(x) for x in (d.get("ids") or [])])
+        return _edit_ok(ed)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/delete", methods=["POST"])
+def api_edit_delete():
+    d = request.get_json(force=True, silent=True) or {}
+    try:
+        ed = _edit_params(d)
+        into = d.get("into")
+        op = ed.do_delete(int(d.get("id")), int(into) if into not in (None, "", 0) else None)
+        return _edit_ok(ed, {"into": op["into"]})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/assign", methods=["POST"])
+def api_edit_assign():
+    d = request.get_json(force=True, silent=True) or {}
+    try:
+        ed = _edit_params(d)
+        ed.do_assign(str(d.get("level") or "state"), int(d.get("pid")),
+                     d.get("target"), str(d.get("op") or "add"))
+        return _edit_ok(ed)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/new_state", methods=["POST"])
+def api_edit_new_state():
+    d = request.get_json(force=True, silent=True) or {}
+    try:
+        ed = _edit_params(d)
+        op = ed.do_new_state(
+            d.get("id"), d.get("provinces") or [],
+            owner=str(d.get("owner") or ""), manpower=int(d.get("manpower") or 0),
+            category=str(d.get("category") or "rural"),
+            infrastructure=int(d.get("infrastructure") or 0),
+            industrial_complex=int(d.get("industrial_complex") or 0),
+            arms_factory=int(d.get("arms_factory") or 0),
+            dockyard=int(d.get("dockyard") or 0),
+            buildings=d.get("buildings") or {}, resources=d.get("resources") or {},
+            mlf=float(d.get("mlf") or 1.0))
+        return _edit_ok(ed, {"file": op["file"], "id": op["id"]})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/state_data")
+def api_edit_state_data():
+    d = dict(request.args)
+    try:
+        ed = _edit_params(d)
+        return jsonify({"ok": True, "data": ed.state_data(d.get("file"))})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/set_state", methods=["POST"])
+def api_edit_set_state():
+    d = request.get_json(force=True, silent=True) or {}
+    try:
+        ed = _edit_params(d)
+        ed.do_state_edit(d.get("file"), d.get("data") or {})
+        return _edit_ok(ed)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/assign_many", methods=["POST"])
+def api_edit_assign_many():
+    d = request.get_json(force=True, silent=True) or {}
+    try:
+        ed = _edit_params(d)
+        ed.do_assign_many(str(d.get("level") or "state"), d.get("pids") or [],
+                          d.get("target"), str(d.get("op") or "add"))
+        return _edit_ok(ed)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/next_id")
+def api_edit_next_id():
+    d = dict(request.args)
+    try:
+        ed = _edit_params(d)
+        which = d.get("which", "state")
+        txts = ed.state_txt if which == "state" else ed.sr_txt
+        mx = 0
+        import re as _re
+        for b, txt in txts.items():
+            m = _re.search(r"\bid\s*=\s*(\d+)", txt)
+            if m:
+                mx = max(mx, int(m.group(1)))
+            else:
+                mm = _re.match(r"(\d+)", b)
+                if mm:
+                    mx = max(mx, int(mm.group(1)))
+        return jsonify({"ok": True, "next": mx + 1, "count": len(txts)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/new_sr", methods=["POST"])
+def api_edit_new_sr():
+    d = request.get_json(force=True, silent=True) or {}
+    try:
+        ed = _edit_params(d)
+        op = ed.do_new_sr(d.get("id"), d.get("provinces") or [])
+        return _edit_ok(ed, {"file": op["file"], "id": op["id"]})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/assets")
+def api_edit_assets():
+    d = dict(request.args)
+    try:
+        ed = _edit_params(d)
+        return jsonify({"ok": True, "assets": ed.assets()})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/continent", methods=["POST"])
+def api_edit_continent():
+    d = request.get_json(force=True, silent=True) or {}
+    try:
+        ed = _edit_params(d)
+        ed.do_assign("continent", int(d.get("pid")), d.get("value"), "set")
+        return _edit_ok(ed)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/undo", methods=["POST"])
+def api_edit_undo():
+    d = request.get_json(force=True, silent=True) or {}
+    try:
+        ed = _edit_params(d)
+        ed.undo()
+        return _edit_ok(ed)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/redo", methods=["POST"])
+def api_edit_redo():
+    d = request.get_json(force=True, silent=True) or {}
+    try:
+        ed = _edit_params(d)
+        ed.redo_op()
+        return _edit_ok(ed)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/reset", methods=["POST"])
+def api_edit_reset():
+    d = request.get_json(force=True, silent=True) or {}
+    try:
+        ed = _edit_params(d)
+        ed.reset()
+        return _edit_ok(ed)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/edit/export", methods=["POST"])
+def api_edit_export():
+    d = request.get_json(force=True, silent=True) or {}
+    out = str(d.get("out_dir") or DEFAULT_OUT)
+
+    def work(tid):
+        try:
+            ed = _edit_params(d)
+            res = ed.export(out, progress=lambda m: task_log(tid, m))
+            task_log(tid, "重建地图缓存 ...")
+            try:
+                from webcache import build
+                build(str(d.get("mod_dir") or DEFAULT_MOD), CACHE_DIR,
+                      progress=lambda m: task_log(tid, m),
+                      game_dir=str(d.get("game_dir") or DEFAULT_GAME),
+                      game_merge=bool(d.get("game_merge", False)),
+                      overlay_dir=out)
+                task_log(tid, "缓存已更新")
+            except Exception as _e:
+                task_log(tid, "缓存重建失败: %s" % _e)
+            task_finish(tid, result=res)
+        except Exception:
+            task_finish(tid, error=traceback.format_exc())
+
+    tid = new_task("edit-export")
+    threading.Thread(target=work, args=(tid,), daemon=True).start()
+    return jsonify({"task": tid})
 
 
 def main():

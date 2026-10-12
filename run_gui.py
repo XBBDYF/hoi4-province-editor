@@ -75,6 +75,7 @@ class App(tk.Tk):
         self.out_var = tk.StringVar(value=DEFAULT_OUT)
         self.game_var = tk.StringVar(value=DEFAULT_GAME)
         self.gmerge_var = tk.BooleanVar(value=False)
+        self.clean_var = tk.BooleanVar(value=True)
         ttk.Label(frm, text="mod 目录").grid(row=0, column=0, sticky="w", padx=4, pady=2)
         ttk.Entry(frm, textvariable=self.mod_var, width=90).grid(row=0, column=1, sticky="we", pady=2)
         ttk.Button(frm, text="浏览", command=lambda: self._pick_dir(self.mod_var)).grid(row=0, column=2, padx=4)
@@ -85,6 +86,7 @@ class App(tk.Tk):
         ttk.Entry(frm, textvariable=self.game_var, width=90).grid(row=2, column=1, sticky="we", pady=2)
         ttk.Button(frm, text="浏览", command=lambda: self._pick_dir(self.game_var)).grid(row=2, column=2, padx=4)
         ttk.Checkbutton(frm, text="states/战略区 与原版合并(完全模拟游戏)", variable=self.gmerge_var).grid(row=3, column=1, sticky="w", padx=4)
+        ttk.Checkbutton(frm, text="细化前清空输出目录", variable=self.clean_var).grid(row=3, column=2, sticky="w", padx=4)
         frm.columnconfigure(1, weight=1)
 
         opt = ttk.LabelFrame(self, text="检测 / 拆分规则")
@@ -225,6 +227,7 @@ class App(tk.Tk):
             out_dir=self.out_var.get(),
             game_dir=self.game_var.get(),
             game_merge=self.gmerge_var.get(),
+            clean_output=self.clean_var.get(),
             threshold=int(self.thr_var.get() or 0),
             target_pixels=int(self.tgt_var.get() or 0),
             min_part_pixels=int(self.minp_var.get() or 0),

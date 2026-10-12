@@ -21,6 +21,7 @@ import re
 import collections
 import colorsys
 import time
+import shutil
 from collections import deque, Counter
 from dataclasses import dataclass, field
 from typing import Callable, Optional
@@ -41,6 +42,7 @@ class Config:
     mod_dir: str = ""
     game_dir: str = ""   # 原版(游戏)根目录: mod 缺失文件时回退到这里
     game_merge: bool = False  # True: states/战略区 与原版合并(完全模拟游戏); False: 仅缺失时回退
+    clean_output: bool = True  # 细化前清空输出目录, 避免上次运行的残留文件冲突
     out_dir: str = ""
     in_place: bool = False
     copy_unchanged: bool = False
@@ -97,6 +99,35 @@ def _write_text(path: str, text: str):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as f:
         f.write(text.encode("utf-8", "surrogateescape"))
+
+
+def _clear_output_dir(out_dir: str, mod_dir: str, log=None) -> int:
+    """清空输出目录, 避免上次运行的残留文件造成冲突。带安全护栏, 危险时跳过。"""
+    if not out_dir:
+        return 0
+    o = os.path.abspath(out_dir)
+    m = os.path.abspath(mod_dir) if mod_dir else ""
+    drive, tail = os.path.splitdrive(o)
+    unsafe = (not os.path.isdir(o)) or tail in ("", os.sep) \
+        or (m and (o == m or m.startswith(o + os.sep) or o.startswith(m + os.sep)))
+    if unsafe:
+        if log:
+            log("跳过清空输出目录(路径不安全或与 mod 重叠): %s" % out_dir)
+        return 0
+    removed = 0
+    for name in os.listdir(o):
+        p = os.path.join(o, name)
+        try:
+            if os.path.isdir(p) and not os.path.islink(p):
+                shutil.rmtree(p, ignore_errors=True)
+            else:
+                os.remove(p)
+            removed += 1
+        except OSError:
+            pass
+    if log:
+        log("已清空输出目录: %s (删除 %d 项)" % (out_dir, removed))
+    return removed
 
 
 def rgb_key(r, g, b) -> int:
@@ -1351,6 +1382,8 @@ def run(cfg: Config, progress: Optional[Callable[[str], None]] = None,
         return summary
 
     out_dir = cfg.mod_dir if cfg.in_place else cfg.out_dir
+    if cfg.clean_output and not cfg.in_place:
+        _clear_output_dir(out_dir, cfg.mod_dir, progress)
     os.makedirs(out_dir, exist_ok=True)
     img = arr.copy()
 

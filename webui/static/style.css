@@ -158,3 +158,24 @@ pre.code{background:#0e1116;border:1px solid var(--line);border-radius:6px;paddi
 ::-webkit-scrollbar-thumb:active{background:var(--accent);background-clip:padding-box}
 ::-webkit-scrollbar-corner{background:#0e1116}
 #side .panes::-webkit-scrollbar-thumb,#log::-webkit-scrollbar-thumb,pre.code::-webkit-scrollbar-thumb{background:#3a4554;background-clip:padding-box}
+
+
+/* ---------- 细化目标图例 ---------- */
+#tgtBox{
+  position:absolute;bottom:34px;right:10px;z-index:20;max-height:44%;overflow:auto;
+  background:rgba(20,24,30,.95);border:1px solid var(--accent);border-radius:8px;
+  padding:8px 10px;font-size:11.5px;display:none;max-width:250px;
+  box-shadow:0 6px 22px rgba(0,0,0,.45);
+}
+#tgtBox h4{margin:0 0 5px;font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:.06em}
+#tgtBox .lg{display:flex;align-items:center;gap:6px;padding:1px 0;cursor:pointer}
+#tgtBox .lg:hover{color:#fff;background:#232a35}
+#tgtBox .lg span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+
+/* ---------- 前后对比滑块 ---------- */
+.cmp{position:relative;overflow:hidden;border:1px solid var(--line);border-radius:6px;background:#000;margin-top:6px;user-select:none}
+.cmp-img{display:block;width:100%}
+.cmp-after{position:absolute;top:0;left:0}
+.cmp-line{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);box-shadow:0 0 6px #000;pointer-events:none}
+.cmp-range{position:absolute;left:0;right:0;bottom:6px;width:90%;margin:0 auto;display:block}

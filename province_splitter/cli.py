@@ -48,6 +48,7 @@ def build_config(a) -> Config:
         mod_dir=os.path.abspath(a.mod),
         game_dir=os.path.abspath(a.game) if a.game else "",
         game_merge=bool(a.game_merge),
+        clean_output=not a.no_clean_output,
         out_dir=os.path.abspath(a.out) if a.out else "",
         in_place=bool(a.in_place),
         threshold=a.threshold,
@@ -128,6 +129,7 @@ def main(argv=None):
     ap.add_argument("--analyze", action="store_true", help="只分析不写入")
     ap.add_argument("--audit", action="store_true", help="只检查地图完整性(战略区/州/铁路/海峡/运河), 不拆分")
     ap.add_argument("--no-repair", action="store_true", help="拆分后不做战略区/铁路/海峡修复")
+    ap.add_argument("--no-clean-output", action="store_true", help="细化前不清空输出目录(默认会清空, 防止残留文件冲突)")
     ap.add_argument("--railway-hops", type=int, default=25, help="铁路断点重连最大插入跳数")
     ap.add_argument("--keep-invalid", action="store_true", help="保留战略区/州中不存在的省份ID(默认会清除)")
     ap.add_argument("--no-canal-complete", action="store_true",

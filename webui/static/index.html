@@ -10,7 +10,7 @@
 <header id="topbar">
   <div class="brand">🗺️ HOI4 地块细化<span class="sub">Project_IRIS Web 控制台</span></div>
   <div class="paths">
-    <label>mod</label><input id="modDir" spellcheck="false">
+    <label>mod</label><input id="modDir" spellcheck="false" placeholder="留空=只加载原版">
     <label>原版</label><input id="gameDir" spellcheck="false">
     <label>输出</label><input id="outDir" spellcheck="false">
     <button id="btnCache">构建/刷新缓存</button>
@@ -32,6 +32,7 @@
         <button id="zFit" title="适应窗口">适应</button>
         <button id="z1" title="1:1">1:1</button>
       </div>
+      <div id="tgtBox"><h4>细化目标 <button id="btnClearTgt" class="ghost" style="float:right;padding:0 6px;line-height:1" title="清除目标">×</button></h4><div id="tgtBody"></div></div>
       <div id="legend"><h4>图例</h4><div id="legendBody"></div></div>
       <div id="tooltip"></div>
     </div>
@@ -40,6 +41,7 @@
       <span>光标 <b id="stPos">–</b></span>
       <span>省份 <b id="stProv">–</b></span>
       <span>已选 <b id="stSel">无</b></span>
+      <span>细化目标 <b id="stTargets">无</b></span>
       <span style="margin-left:auto" id="stMsg"></span>
     </div>
   </main>
@@ -50,6 +52,7 @@
       <button data-tab="analyze">分析</button>
       <button data-tab="refine">细化</button>
       <button data-tab="audit">检查</button>
+      <button data-tab="edit">编辑</button>
       <button data-tab="prov">省份</button>
       <button data-tab="report">报告</button>
     </nav>
@@ -123,6 +126,60 @@
         <p class="hint">修复会把 战略区/州/铁路/海峡/运河 的修正写入“输出目录”，<b>不拆分任何地块</b>。修复完成后会自动重跑检查。</p>
         <fieldset><legend>修复日志</legend><div id="repairLog" class="tiny" style="max-height:150px;overflow:auto;white-space:pre-wrap">—</div></fieldset>
         <div id="auditBody" class="tiny">检查战略区/州归属、铁路断连、海峡运河、孤立碎块、十字交叉。</div>
+      </section>
+
+      <!-- 编辑 -->
+      <section class="pane" data-pane="edit">
+        <div class="toolbar">
+          <label class="check"><input type="checkbox" id="editMode">编辑模式</label>
+          <label>图层</label>
+          <select id="edLayer">
+            <option value="state">州(state)：底色=州，边框=地块</option>
+            <option value="sr">战略区：底色=战略区，边框=州</option>
+            <option value="continent">大洲：底色=大洲，边框=战略区</option>
+            <option value="prov">地块(province)：合并/删除</option>
+          </select>
+          <label>参考</label>
+          <select id="edRef">
+            <option value="mod">mod 原文件</option>
+            <option value="output">output 输出</option>
+          </select>
+        </div>
+        <fieldset><legend>操作方式</legend>
+          <div id="edTarget" class="tiny" style="color:var(--accent)">当前目标：未选择</div>
+          <p class="hint">点击一个地块＝选它所在的<b>州/战略区/大洲</b>为目标（整片会描边）；<b>Shift+点击</b>＝把该地块加入/移出目标；空地块 Shift 点击会直接加入。州层只能放陆地/湖泊。</p>
+        </fieldset>
+        <fieldset><legend>当前选中 / 地块信息</legend>
+          <div id="edSel" class="tiny">未选中</div>
+          <div id="edInfo" class="tiny"></div>
+          <div class="row"><button id="edClearSel" class="ghost">清空选择</button></div>
+        </fieldset>
+        <fieldset><legend>地块工具（省份层）</legend>
+          <div class="row"><button id="edMerge">合并（第一个为目标）</button><button id="edDelete">删除（并入最大邻居）</button></div>
+        </fieldset>
+        <fieldset><legend>编辑州（选中州后显示其数据，可修改并保存）</legend>
+          <div id="nsCur" class="tiny" style="color:var(--accent)">未选择州</div>
+          <div class="row"><label>当前州ID</label><input id="nsEditId" readonly style="width:120px"></div>
+          <div class="grid">
+            <div class="f"><label>归属国 owner</label><input id="nsOwner"></div>
+            <div class="f"><label>人数 manpower</label><input id="nsManpower" type="number" value="100000"></div>
+            <div class="f"><label>州类别 category</label><input id="nsCategory" value="rural"></div>
+            <div class="f"><label>基建</label><input id="nsInfra" type="number" value="0"></div>
+            <div class="f"><label>民工</label><input id="nsInd" type="number" value="0"></div>
+            <div class="f"><label>军工厂</label><input id="nsArms" type="number" value="0"></div>
+            <div class="f"><label>船坞</label><input id="nsDock" type="number" value="0"></div>
+          </div>
+          <div class="row"><label>其它建筑</label><select id="nsBuilding">/Datalist</select><input id="nsBuildingLv" type="number" value="1" style="width:64px"><button id="nsAddBuilding" class="ghost">添加</button></div>
+          <div id="nsBuildings" class="tiny">—</div>
+          <div class="row"><button id="nsSave" class="primary">保存州数据</button><button id="edNewStateCreate" class="ghost">用选中地块新建州</button></div>
+        </fieldset>
+        <fieldset><legend>新建战略区</legend>
+          <div class="row"><input id="nsrId" type="number" placeholder="战略区ID" style="flex:1"><button id="edNewSrCreate" class="primary">用当前选中地块 新建战略区</button></div>
+        </fieldset>
+        <fieldset><legend>撤销 / 导出</legend>
+          <div class="row"><button id="edUndo">撤销</button><button id="edRedo">重做</button><button id="edReset">重置</button><button id="edExport" class="primary">导出到输出目录</button></div>
+          <div id="edOps" class="tiny" style="max-height:140px;overflow:auto;white-space:pre-wrap">—</div>
+        </fieldset>
       </section>
 
       <!-- 省份 -->

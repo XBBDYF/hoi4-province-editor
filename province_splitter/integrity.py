@@ -511,6 +511,50 @@ def audit(mod_dir: str, progress=None, game_dir: str = "", game_merge: bool = Fa
     _bank_removed = getattr(fix_adjacency_rules, "last_removed", 0)
     _bank_added = getattr(fix_adjacency_rules, "last_added", 0)
 
+    log("检查其他引用 (supply_nodes/buildings/victory_points) ...")
+    ref = {"supply_nodes_total": 0, "supply_nodes_invalid": 0,
+           "buildings_total": 0, "buildings_invalid": 0,
+           "vp_total": 0, "vp_invalid": 0}
+    _ref_ex = []
+
+    def _num(s):
+        s = (s or "").strip()
+        return int(s) if s.lstrip("-").isdigit() else None
+
+    _sp = _R("map", "supply_nodes.txt")
+    if os.path.isfile(_sp):
+        for ln in _read_text(_sp).split("\n"):
+            tok = ln.split()
+            if len(tok) >= 2:
+                v = _num(tok[1])
+                if v is not None:
+                    ref["supply_nodes_total"] += 1
+                    if v not in valid:
+                        ref["supply_nodes_invalid"] += 1
+                        if len(_ref_ex) < 15:
+                            _ref_ex.append("supply_node:%d" % v)
+    _bp = _R("map", "buildings.txt")
+    if os.path.isfile(_bp) and os.path.getsize(_bp) < 80 * 1024 * 1024:
+        for ln in open(_bp, encoding="utf-8-sig", errors="replace"):
+            if ";" in ln:
+                v = _num(ln.split(";", 1)[0])
+                if v is not None:
+                    ref["buildings_total"] += 1
+                    if v not in valid:
+                        ref["buildings_invalid"] += 1
+                        if len(_ref_ex) < 15:
+                            _ref_ex.append("buildings:%d" % v)
+    for _fp, _txt in stt.items():
+        for _mm in re.finditer(r"victory_points\s*=\s*\{([^}]*)\}", _txt):
+            _tk = [x for x in _mm.group(1).split() if x.lstrip("-").isdigit()]
+            for _k in range(0, len(_tk) - 1, 2):
+                _v = int(_tk[_k])
+                ref["vp_total"] += 1
+                if _v not in valid:
+                    ref["vp_invalid"] += 1
+                    if len(_ref_ex) < 15:
+                        _ref_ex.append("victory_point:%d" % _v)
+
     log("检查地块连通性 ...")
     disc, disc_frag = count_disconnected(pid)
 
@@ -528,6 +572,10 @@ def audit(mod_dir: str, progress=None, game_dir: str = "", game_merge: bool = Fa
         canal_rules_unresolved=_bank_unresolved,
         canal_required_provinces_to_remove=_bank_removed,
         canal_bank_provinces_to_add=_bank_added,
+        ref_supply_nodes_total=ref["supply_nodes_total"], ref_supply_nodes_invalid=ref["supply_nodes_invalid"],
+        ref_buildings_total=ref["buildings_total"], ref_buildings_invalid=ref["buildings_invalid"],
+        ref_vp_total=ref["vp_total"], ref_vp_invalid=ref["vp_invalid"],
+        ref_invalid_examples=_ref_ex,
         sr_dup_items=list(srdup.items())[:20],
         state_dup_items=list(stdup.items())[:20],
     )
