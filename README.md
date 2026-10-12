@@ -127,3 +127,29 @@ output/
 - **大洲别乱选**：如果给了大洲过滤却选错，会漏拆。
 - 拆得太多会让省份总数暴涨，注意 HOI4 对地块总数的引擎上限。
 - `adjacencies.csv` 里若本来就存在"Through 与两端不相邻"的条目（本 mod 原有约 110 条），工具只报告、不强行改。
+
+
+---
+
+## 原版(游戏)目录回退  `--game`
+
+mod 里的地图文件可能不完整（缺 `provinces.bmp` / `rivers.bmp` / `adjacency_rules.txt` / 全量
+`history/states/*` 等），这时需要拿原版补上。用 `--game` 指定原版安装目录：
+
+```bat
+py -3.13 run_cli.py --mod "C:\...\Project_IRIS" ^
+    --game "D:\Program Files (x86)\Steam\steamapps\common\Hearts of Iron IV" ^
+    --out "D:\out" --threshold 200 --scope all
+```
+
+规则：
+1. **单文件**：mod 有就用 mod 的，没有才用原版的（`map/definition.csv`、`provinces.bmp`、
+   `continent.txt`、`rivers.bmp`、`adjacencies.csv`、`railways.txt`、`adjacency_rules.txt`、
+   `map/terrain/colormap_*.dds`）。
+2. **目录（states / strategicregions）**：默认 **mod 有该类文件就只用 mod 的**；mod 完全没有该类
+   文件时才回退原版。这样总转换 mod 不会被塞进上千个原版州文件。
+3. 加 `--game-merge` 则**完全合并** mod 与原版（同名以 mod 为准），等价于 HOI4 的真实加载行为。
+4. 输出目录里只会写出**真正改动过**的文件；来源是原版但未改动的文件不会复制进输出。
+
+GUI 有「原版目录」输入框 +「states/战略区 与原版合并」复选；Web 控制台顶栏有「原版」输入框，
+参数区有同名复选。

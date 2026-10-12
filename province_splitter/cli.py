@@ -46,6 +46,8 @@ def parse_parts(s: str):
 def build_config(a) -> Config:
     cfg = Config(
         mod_dir=os.path.abspath(a.mod),
+        game_dir=os.path.abspath(a.game) if a.game else "",
+        game_merge=bool(a.game_merge),
         out_dir=os.path.abspath(a.out) if a.out else "",
         in_place=bool(a.in_place),
         threshold=a.threshold,
@@ -83,6 +85,8 @@ def build_config(a) -> Config:
 def main(argv=None):
     ap = argparse.ArgumentParser(description="HOI4 地块(province)细化工具")
     ap.add_argument("--mod", required=True, help="mod 根目录(包含 map/ 与 history/)")
+    ap.add_argument("--game", default="", help="原版(游戏)根目录: mod 里缺失的文件(如全量 states/strategicregions/provinces.bmp)会从这里回退读取")
+    ap.add_argument("--game-merge", action="store_true", help="states/战略区 与原版合并(完全模拟游戏加载); 默认仅在 mod 缺失该类文件时回退")
     ap.add_argument("--out", default="", help="输出目录(默认 <mod>/../地块细化输出)")
     ap.add_argument("--threshold", type=int, default=200, help="像素面积上限, 超过则细化")
     ap.add_argument("--target", type=int, default=0, help="目标每块面积(0=用 threshold)")
@@ -134,7 +138,9 @@ def main(argv=None):
 
     if a.audit:
         from .integrity import audit
-        info = audit(os.path.abspath(a.mod), progress=lambda m: print(m, flush=True))
+        info = audit(os.path.abspath(a.mod), progress=lambda m: print(m, flush=True),
+                     game_dir=os.path.abspath(a.game) if a.game else "",
+                     game_merge=bool(a.game_merge))
         print("\n==== 完整性检查 ====")
         for k, v in info.items():
             if k.endswith("_items") or k == "adjacency_bad_rows":

@@ -39,6 +39,8 @@ PROV_RE = re.compile(r"(provinces\s*=\s*\{)([^}]*)(\})", re.DOTALL)
 @dataclass
 class Config:
     mod_dir: str = ""
+    game_dir: str = ""   # 原版(游戏)根目录: mod 缺失文件时回退到这里
+    game_merge: bool = False  # True: states/战略区 与原版合并(完全模拟游戏); False: 仅缺失时回退
     out_dir: str = ""
     in_place: bool = False
     copy_unchanged: bool = False
@@ -263,8 +265,9 @@ class ColorIndex:
 # --------------------------------------------------------------------------- #
 # continent.txt
 # --------------------------------------------------------------------------- #
-def read_continent_names(mod_dir: str) -> list:
-    p = os.path.join(mod_dir, "map", "continent.txt")
+def read_continent_names(mod_dir: str, game_dir: str = "") -> list:
+    from . import paths as _paths
+    p = _paths.resolve(mod_dir, game_dir, "map", "continent.txt")
     if not os.path.isfile(p):
         return []
     text = _read_text(p)
@@ -1157,14 +1160,22 @@ def run(cfg: Config, progress: Optional[Callable[[str], None]] = None,
     t0 = time.time()
     summary = Summary(dry_run=cfg.dry_run)
     mod = cfg.mod_dir
+    game = getattr(cfg, "game_dir", "") or ""
     map_dir = os.path.join(mod, "map")
+    from . import paths as _paths
+
+    def _R(*parts):
+        return _paths.resolve(mod, game, *parts)
+
+    if game and os.path.isdir(game):
+        _log(progress, "原版目录(缺失文件回退): %s" % game)
 
     _log(progress, "读取 definition.csv ...")
-    definition = read_definition(os.path.join(map_dir, "definition.csv"))
-    continent_names = read_continent_names(mod)
+    definition = read_definition(_R("map", "definition.csv"))
+    continent_names = read_continent_names(mod, game)
 
     _log(progress, "读取 provinces.bmp ...")
-    arr = load_provinces_bmp(os.path.join(map_dir, "provinces.bmp"))
+    arr = load_provinces_bmp(_R("map", "provinces.bmp"))
     packed = pack_rgb(arr)
     h, w = packed.shape
 
@@ -1191,16 +1202,10 @@ def run(cfg: Config, progress: Optional[Callable[[str], None]] = None,
             _log(progress, "沿海判定不可用: %s" % _e)
 
     _log(progress, "扫描 states / strategic regions ...")
-    states_dir = os.path.join(mod, "history", "states")
-    sr_dir = os.path.join(map_dir, "strategicregions")
-    state_files = []
-    if os.path.isdir(states_dir):
-        state_files = [os.path.join(states_dir, f) for f in os.listdir(states_dir)
-                       if f.lower().endswith(".txt")]
-    sr_files = []
-    if os.path.isdir(sr_dir):
-        sr_files = [os.path.join(sr_dir, f) for f in os.listdir(sr_dir)
-                    if f.lower().endswith(".txt")]
+    state_files = _paths.list_merged(mod, game, "history", "states", exts=(".txt",),
+                                    merge=cfg.game_merge)
+    sr_files = _paths.list_merged(mod, game, "map", "strategicregions", exts=(".txt",),
+                                  merge=cfg.game_merge)
     state_of, state_txt = build_province_owner_index(state_files)
     sr_of, sr_txt = build_province_owner_index(sr_files)
 
@@ -1351,7 +1356,7 @@ def run(cfg: Config, progress: Optional[Callable[[str], None]] = None,
 
     # 输出路径映射
     def out_path(src_abs):
-        rel = os.path.relpath(src_abs, mod)
+        rel = _paths.out_rel(src_abs, mod, game)
         return os.path.join(out_dir, rel)
 
     changed = set()
@@ -1596,7 +1601,7 @@ def run(cfg: Config, progress: Optional[Callable[[str], None]] = None,
 
     # 写 provinces.bmp
     _log(progress, "写出 provinces.bmp ...")
-    bmp_src = os.path.join(map_dir, "provinces.bmp")
+    bmp_src = _R("map", "provinces.bmp")
     bmp_out = out_path(bmp_src)
     # 先记住原文件大小。in-place 模式下如果保存后再 getsize，就已经变成新文件大小了。
     try:
@@ -1619,7 +1624,7 @@ def run(cfg: Config, progress: Optional[Callable[[str], None]] = None,
 
     # 写 definition.csv (保留原始排版与注释 + 覆写 coastal + 追加新行)
     _log(progress, "写出 definition.csv ...")
-    def_out = out_path(os.path.join(map_dir, "definition.csv"))
+    def_out = out_path(_R("map", "definition.csv"))
     raw = definition.raw
     nl_b = b"\r\n" if b"\r\n" in raw[:200] else b"\n"
     nl_s = "\r\n" if nl_b == b"\r\n" else "\n"
@@ -1655,7 +1660,7 @@ def run(cfg: Config, progress: Optional[Callable[[str], None]] = None,
             # 河道候选仅作辅助；真正的运河以 adjacency_rules.txt 的显式 CANAL 规则为准
             canal_list = []
             canals_idx = None
-            rivers_path = os.path.join(map_dir, "rivers.bmp")
+            rivers_path = _R("map", "rivers.bmp")
             if os.path.isfile(rivers_path):
                 try:
                     _rivers = _canals_mod.load_rivers(rivers_path)
@@ -1666,7 +1671,7 @@ def run(cfg: Config, progress: Optional[Callable[[str], None]] = None,
                     _log(progress, "运河识别跳过: %s" % _ce)
             sea_ids = set(i for i, r in defn2.recs.items() if r[4] == "sea")
 
-            ap = os.path.join(map_dir, "adjacencies.csv")
+            ap = _R("map", "adjacencies.csv")
             at_orig = _read_text(ap) if os.path.isfile(ap) else ""
             at2 = at_orig
             # 铁路/海峡连接: 像素相邻 + adjacencies.csv 的 From-To
@@ -1699,7 +1704,7 @@ def run(cfg: Config, progress: Optional[Callable[[str], None]] = None,
                 _log(progress, msg)
 
             # 2) 铁路 (只允许陆地地块作中间点, 考虑海峡/运河连接)
-            rp = os.path.join(map_dir, "railways.txt")
+            rp = _R("map", "railways.txt")
             if os.path.isfile(rp):
                 land2 = set(i for i, r in defn2.recs.items() if r[4] == "land")
                 rt2, nch = fix_railways(_read_text(rp), nb_all, cfg.railway_max_hops,
@@ -1719,7 +1724,7 @@ def run(cfg: Config, progress: Optional[Callable[[str], None]] = None,
                     summary.notes.append("运河: 识别 %d 条, 修正 %d 条" % (_crows, _cchg))
                     _log(progress, "运河: 识别 %d 条, 修正 %d 条" % (_crows, _cchg))
                 if cfg.canal_complete:
-                    rules_path = os.path.join(map_dir, "adjacency_rules.txt")
+                    rules_path = _R("map", "adjacency_rules.txt")
                     rules_text = _read_text(rules_path) if os.path.isfile(rules_path) else ""
                     at2, nadd, added_rows, legacy_removed = complete_canals(
                         at2, canal_list, nb, sea_ids, rules_text=rules_text, children=children)
@@ -1740,7 +1745,7 @@ def run(cfg: Config, progress: Optional[Callable[[str], None]] = None,
                 if unfix:
                     summary.notes.append("海峡/连线: %d 条无法自动修正(需人工检查)" % len(unfix))
                     _log(progress, "[注意] 海峡/连线: %d 条无法自动修正" % len(unfix))
-            rlp = os.path.join(map_dir, "adjacency_rules.txt")
+            rlp = _R("map", "adjacency_rules.txt")
             if os.path.isfile(rlp):
                 rules_text = _read_text(rlp)
                 rlt2, nrch = fix_adjacency_rules(

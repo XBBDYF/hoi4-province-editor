@@ -393,26 +393,28 @@ def fix_adjacencies(text: str, nb, children, canals_idx=None):
     return nl.join(out), changed, fixed_rows, unfixed
 
 
-def audit(mod_dir: str, progress=None):
-    """检查一个 mod 的地图完整性, 返回统计字典。"""
+def audit(mod_dir: str, progress=None, game_dir: str = "", game_merge: bool = False):
+    """检查一个 mod 的地图完整性, 返回统计字典。缺失文件回退到原版 game_dir。"""
     from .core import read_definition, _read_text
+    from . import paths as _paths
     def log(m):
         if progress:
             progress(m)
     mdir = os.path.join(mod_dir, "map")
+    game = game_dir or ""
+
+    def _R(*parts):
+        return _paths.resolve(mod_dir, game, *parts)
+
     log("读取 definition.csv ...")
-    definition = read_definition(os.path.join(mdir, "definition.csv"))
+    definition = read_definition(_R("map", "definition.csv"))
     log("读取 provinces.bmp 并建立邻接 ...")
-    pid = load_pid_map(os.path.join(mdir, "provinces.bmp"), definition)
+    pid = load_pid_map(_R("map", "provinces.bmp"), definition)
     pairs, nb = build_adjacency(pid)
     valid = set(definition.recs)
 
     def scan(sub):
-        d = os.path.join(mod_dir, sub)
-        files = []
-        if os.path.isdir(d):
-            files = sorted(os.path.join(d, f) for f in os.listdir(d)
-                           if f.lower().endswith(".txt"))
+        files = _paths.list_merged(mod_dir, game, sub, exts=(".txt",), merge=game_merge)
         texts = {fp: _read_text(fp) for fp in files}
         memb = collections.defaultdict(list)
         for fp in files:
@@ -429,8 +431,10 @@ def audit(mod_dir: str, progress=None):
     stf, stt, stm, stdup, stinv = scan(os.path.join("history", "states"))
 
     log("检查 railways ...")
-    rt = _read_text(os.path.join(mdir, "railways.txt"))
-    at0 = _read_text(os.path.join(mdir, "adjacencies.csv"))
+    _rt_p = _R("map", "railways.txt")
+    rt = _read_text(_rt_p) if os.path.isfile(_rt_p) else ""
+    _at_p = _R("map", "adjacencies.csv")
+    at0 = _read_text(_at_p) if os.path.isfile(_at_p) else ""
     nb_all = collections.defaultdict(set)
     for k, v in nb.items():
         nb_all[k] = set(v)
@@ -453,9 +457,9 @@ def audit(mod_dir: str, progress=None):
     canal_list = []
     canal_count = 0
     canal_missing = 0
-    rules_path = os.path.join(mdir, "adjacency_rules.txt")
+    rules_path = _R("map", "adjacency_rules.txt")
     rules_text = _read_text(rules_path) if os.path.isfile(rules_path) else ""
-    rivers_path = os.path.join(mdir, "rivers.bmp")
+    rivers_path = _R("map", "rivers.bmp")
     if os.path.isfile(rivers_path):
         try:
             rivers = _canals.load_rivers(rivers_path)

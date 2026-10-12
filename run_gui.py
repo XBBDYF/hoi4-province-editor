@@ -22,6 +22,7 @@ from tkinter import ttk, filedialog, messagebox
 from province_splitter.core import Config, run
 
 DEFAULT_MOD = r"C:\Users\Administrator\Documents\Paradox Interactive\Hearts of Iron IV\mod\Project_IRIS"
+DEFAULT_GAME = r"D:\Program Files (x86)\Steam\steamapps\common\Hearts of Iron IV"
 DEFAULT_OUT = r"D:\地块细化\output"
 DEFAULT_GRAD = r"D:\地块细化\底图密度.png"
 if not os.path.isfile(DEFAULT_GRAD):
@@ -72,12 +73,18 @@ class App(tk.Tk):
         frm.pack(fill="x", **pad)
         self.mod_var = tk.StringVar(value=DEFAULT_MOD)
         self.out_var = tk.StringVar(value=DEFAULT_OUT)
+        self.game_var = tk.StringVar(value=DEFAULT_GAME)
+        self.gmerge_var = tk.BooleanVar(value=False)
         ttk.Label(frm, text="mod 目录").grid(row=0, column=0, sticky="w", padx=4, pady=2)
         ttk.Entry(frm, textvariable=self.mod_var, width=90).grid(row=0, column=1, sticky="we", pady=2)
         ttk.Button(frm, text="浏览", command=lambda: self._pick_dir(self.mod_var)).grid(row=0, column=2, padx=4)
         ttk.Label(frm, text="输出目录").grid(row=1, column=0, sticky="w", padx=4, pady=2)
         ttk.Entry(frm, textvariable=self.out_var, width=90).grid(row=1, column=1, sticky="we", pady=2)
         ttk.Button(frm, text="浏览", command=lambda: self._pick_dir(self.out_var)).grid(row=1, column=2, padx=4)
+        ttk.Label(frm, text="原版目录").grid(row=2, column=0, sticky="w", padx=4, pady=2)
+        ttk.Entry(frm, textvariable=self.game_var, width=90).grid(row=2, column=1, sticky="we", pady=2)
+        ttk.Button(frm, text="浏览", command=lambda: self._pick_dir(self.game_var)).grid(row=2, column=2, padx=4)
+        ttk.Checkbutton(frm, text="states/战略区 与原版合并(完全模拟游戏)", variable=self.gmerge_var).grid(row=3, column=1, sticky="w", padx=4)
         frm.columnconfigure(1, weight=1)
 
         opt = ttk.LabelFrame(self, text="检测 / 拆分规则")
@@ -216,6 +223,8 @@ class App(tk.Tk):
         return Config(
             mod_dir=self.mod_var.get(),
             out_dir=self.out_var.get(),
+            game_dir=self.game_var.get(),
+            game_merge=self.gmerge_var.get(),
             threshold=int(self.thr_var.get() or 0),
             target_pixels=int(self.tgt_var.get() or 0),
             min_part_pixels=int(self.minp_var.get() or 0),
@@ -267,10 +276,12 @@ class App(tk.Tk):
         self.logw("=" * 40)
         self.logw("完整性检查开始 ...")
         mod = self.mod_var.get()
+        game = self.game_var.get()
+        gmerge = self.gmerge_var.get()
         def work():
             try:
                 from province_splitter.integrity import audit
-                info = audit(mod, progress=lambda m: self.q.put(("log", m)))
+                info = audit(mod, progress=lambda m: self.q.put(("log", m)), game_dir=game, game_merge=gmerge)
                 self.q.put(("audit", info))
             except Exception:
                 self.q.put(("err", traceback.format_exc()))

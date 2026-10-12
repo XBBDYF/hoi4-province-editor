@@ -51,19 +51,61 @@ def pal(n: int):
     return out
 
 
-def build(mod: str, out: str, progress=None, disp_max_w: int = 2816):
+def _resolve(mod, game, *parts):
+    rel = os.path.join(*parts)
+    m = os.path.join(mod, rel)
+    if os.path.exists(m):
+        return m
+    if game:
+        g = os.path.join(game, rel)
+        if os.path.exists(g):
+            return g
+    return m
+
+
+def _list_merged(mod, game, *parts, merge=False):
+    rel = os.path.join(*parts)
+
+    def one(root):
+        if not root:
+            return []
+        d = os.path.join(root, rel)
+        if not os.path.isdir(d):
+            return []
+        return [os.path.join(d, f) for f in sorted(os.listdir(d)) if f.lower().endswith(".txt")]
+
+    mod_files = one(mod)
+    if mod_files and not merge:
+        return mod_files
+    if not merge:
+        return one(game)
+    names = set()
+    out = []
+    for root in (mod, game):
+        for fp in one(root):
+            name = os.path.basename(fp)
+            if name in names:
+                continue
+            names.add(name)
+            out.append(fp)
+    return out
+
+
+def build(mod: str, out: str, progress=None, disp_max_w: int = 2816, game_dir: str = "",
+          game_merge: bool = False):
     def log(m):
         if progress:
             progress(str(m))
 
     mod = os.path.abspath(mod)
+    game = os.path.abspath(game_dir) if game_dir else ""
     os.makedirs(out, exist_ok=True)
-    mdir = os.path.join(mod, "map")
+    mdir = _resolve(mod, game, "map")
 
     # ---- definition.csv ----
     log("读取 definition.csv ...")
     recs = {}
-    for line in open(os.path.join(mdir, "definition.csv"), encoding="utf-8-sig", errors="replace"):
+    for line in open(_resolve(mod, game, "map", "definition.csv"), encoding="utf-8-sig", errors="replace"):
         p = line.strip().split(";")
         if len(p) >= 8 and p[0].isdigit():
             recs[int(p[0])] = p
@@ -71,7 +113,7 @@ def build(mod: str, out: str, progress=None, disp_max_w: int = 2816):
 
     # ---- provinces.bmp -> 省份ID图 ----
     log("读取 provinces.bmp 并解码省份ID ...")
-    arr = np.asarray(Image.open(os.path.join(mdir, "provinces.bmp")).convert("RGB")).astype(np.int64)
+    arr = np.asarray(Image.open(_resolve(mod, game, "map", "provinces.bmp")).convert("RGB")).astype(np.int64)
     h, w = arr.shape[:2]
     lut = np.zeros(1 << 24, dtype=np.int32)
     for pid, r in recs.items():
@@ -91,7 +133,7 @@ def build(mod: str, out: str, progress=None, disp_max_w: int = 2816):
     pid_d = pid[::step, ::step]
 
     # 地形底图 (colormap DDS)
-    dds = os.path.join(mdir, "terrain", "colormap_rgb_cityemissivemask_a.dds")
+    dds = _resolve(mod, game, "map", "terrain", "colormap_rgb_cityemissivemask_a.dds")
     if os.path.isfile(dds):
         log("从 colormap DDS 解出地形底图 ...")
         raw = open(dds, "rb").read()
@@ -106,7 +148,7 @@ def build(mod: str, out: str, progress=None, disp_max_w: int = 2816):
         del bimg
     else:
         log("未找到 colormap, 用 provinces.bmp 缩放为底图 ...")
-        src = Image.open(os.path.join(mdir, "provinces.bmp")).convert("RGB")
+        src = Image.open(_resolve(mod, game, "map", "provinces.bmp")).convert("RGB")
         src = src.resize((dw, dh), Image.BILINEAR)
         src.save(os.path.join(out, "base_map.png"))
 
@@ -136,21 +178,17 @@ def build(mod: str, out: str, progress=None, disp_max_w: int = 2816):
 
     # ---- 战略区 / 州 ----
     def scan(sub):
-        d = os.path.join(mod, sub)
         owner = {}
         names = []
-        if os.path.isdir(d):
-            for f in sorted(os.listdir(d)):
-                if not f.lower().endswith(".txt"):
-                    continue
-                m = PROV_RE.search(read_text(os.path.join(d, f)))
-                if not m:
-                    continue
-                idx = len(names)
-                names.append(os.path.splitext(f)[0])
-                for tok in re.sub(r"#[^\n]*", "", m.group(1)).split():
-                    if tok.isdigit():
-                        owner.setdefault(int(tok), idx)
+        for fp in _list_merged(mod, game, sub, merge=game_merge):
+            m = PROV_RE.search(read_text(fp))
+            if not m:
+                continue
+            idx = len(names)
+            names.append(os.path.splitext(os.path.basename(fp))[0])
+            for tok in re.sub(r"#[^\n]*", "", m.group(1)).split():
+                if tok.isdigit():
+                    owner.setdefault(int(tok), idx)
         return owner, names
 
     log("扫描 战略区 / 州 归属 ...")
@@ -158,7 +196,7 @@ def build(mod: str, out: str, progress=None, disp_max_w: int = 2816):
     st_owner, st_names = scan(os.path.join("history", "states"))
 
     cont_names = []
-    cp = os.path.join(mdir, "continent.txt")
+    cp = _resolve(mod, game, "map", "continent.txt")
     if os.path.isfile(cp):
         m = re.search(r"continents\s*=\s*\{(.*?)\}", read_text(cp), re.DOTALL)
         if m:
@@ -238,11 +276,13 @@ def build(mod: str, out: str, progress=None, disp_max_w: int = 2816):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mod", required=True)
+    ap.add_argument("--game", default="")
+    ap.add_argument("--game-merge", action="store_true")
     ap.add_argument("--out", default="")
     a = ap.parse_args()
     here = os.path.dirname(os.path.abspath(__file__))
     out = a.out or os.path.join(here, "cache")
-    build(a.mod, out, progress=lambda m: print(m, flush=True))
+    build(a.mod, out, progress=lambda m: print(m, flush=True), game_dir=a.game, game_merge=a.game_merge)
 
 
 if __name__ == "__main__":

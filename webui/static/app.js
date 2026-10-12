@@ -93,6 +93,7 @@ const CFG_SCHEMA = [
   ['完整性修复', [
     ['repair', 'check', '修复 战略区/州/铁路/海峡', true],
     ['canal_complete', 'check', '用 rivers.bmp 辅助校验/谨慎补全运河连线', true],
+    ['game_merge', 'check', 'states/战略区 与原版合并(完全模拟游戏)', false],
     ['railway_max_hops', 'number', '铁路重连跳数', 25],
     ['strip_invalid', 'check', '清除无效省份ID', true],
     ['island_max_px', 'number', '孤岛阈值 (px)', 5],
@@ -165,6 +166,7 @@ function collectCfg() {
   }
   o.mod_dir = $('#modDir').value.trim();
   o.out_dir = $('#outDir').value.trim();
+  o.game_dir = $('#gameDir') ? $('#gameDir').value.trim() : '';
   try { localStorage.setItem(CFG_KEY, JSON.stringify(o)); } catch { }
   return o;
 }
@@ -683,7 +685,7 @@ async function doAudit() {
   collectCfg();
   $('#audSpinner').style.display = 'inline-flex';
   $('#auditBody').innerHTML = '检查中…';
-  await runJob('/api/audit', { mod_dir: $('#modDir').value.trim() }, {
+  await runJob('/api/audit', { mod_dir: $('#modDir').value.trim(), game_dir: ($('#gameDir') ? $('#gameDir').value.trim() : '') }, {
     onLog: () => { },
     onDone: (info) => {
       $('#audSpinner').style.display = 'none';
@@ -776,7 +778,8 @@ function setChip(ok, text) {
 
 async function refreshState() {
   const mod = $('#modDir').value.trim(), out = $('#outDir').value.trim();
-  const st = await fetch(`/api/state?mod=${encodeURIComponent(mod)}&out=${encodeURIComponent(out)}`).then(r => r.json());
+  const game = $('#gameDir') ? $('#gameDir').value.trim() : '';
+  const st = await fetch(`/api/state?mod=${encodeURIComponent(mod)}&out=${encodeURIComponent(out)}&game=${encodeURIComponent(game)}`).then(r => r.json());
   if (!st.mod_exists) setChip(false, 'mod 路径无效');
   else if (st.cache_exists) {
     const m = st.cache_meta || {};
@@ -787,9 +790,10 @@ async function refreshState() {
 
 async function buildCache() {
   const mod = $('#modDir').value.trim();
+  const game = $('#gameDir') ? $('#gameDir').value.trim() : '';
   setMsg('正在构建缓存…');
   $('#btnCache').disabled = true;
-  const t = await runJob('/api/cache/build', { mod_dir: mod }, {
+  const t = await runJob('/api/cache/build', { mod_dir: mod, game_dir: game }, {
     onLog: (m) => setMsg(m),
     onDone: async () => {
       $('#btnCache').disabled = false;
@@ -809,10 +813,12 @@ async function boot(reload) {
   if (!reload) {
     $('#modDir').value = localStorage.getItem('modDir') || App.defaults.mod_dir;
     $('#outDir').value = localStorage.getItem('outDir') || App.defaults.out_dir;
+    if ($('#gameDir')) $('#gameDir').value = localStorage.getItem('gameDir') || App.defaults.game_dir || '';
     if ($('#cfg_grad_path')) $('#cfg_grad_path').value = localStorage.getItem('gradPath') || App.defaults.grad_path;
-    $('#modDir').onchange = $('#outDir').onchange = () => {
+    $('#modDir').onchange = $('#outDir').onchange = $('#gameDir').onchange = () => {
       localStorage.setItem('modDir', $('#modDir').value.trim());
       localStorage.setItem('outDir', $('#outDir').value.trim());
+      if ($('#gameDir')) localStorage.setItem('gameDir', $('#gameDir').value.trim());
       refreshState();
     };
   } else {

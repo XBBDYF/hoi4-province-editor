@@ -37,6 +37,7 @@ from province_splitter.core import Config, run
 CACHE_DIR = os.path.join(HERE, "cache")
 
 DEFAULT_MOD = r"C:\Users\Administrator\Documents\Paradox Interactive\Hearts of Iron IV\mod\Project_IRIS"
+DEFAULT_GAME = r"D:\Program Files (x86)\Steam\steamapps\common\Hearts of Iron IV"
 DEFAULT_OUT = os.path.join(ROOT, "output")
 
 
@@ -133,6 +134,8 @@ def build_config(d: dict, dry: bool) -> Config:
     g = d.get
     cfg = Config(
         mod_dir=str(g("mod_dir") or DEFAULT_MOD).strip(),
+        game_dir=str(g("game_dir") or DEFAULT_GAME).strip(),
+        game_merge=bool(g("game_merge", False)),
         out_dir=str(g("out_dir") or DEFAULT_OUT).strip(),
         in_place=bool(g("in_place", False)),
         threshold=int(g("threshold", 200) or 0),
@@ -204,7 +207,7 @@ def out_file(name):
     return send_from_directory(DEFAULT_OUT, name)
 
 
-ALLOWED_ROOTS = [ROOT, DEFAULT_MOD, DEFAULT_OUT, CACHE_DIR]
+ALLOWED_ROOTS = [ROOT, DEFAULT_MOD, DEFAULT_GAME, DEFAULT_OUT, CACHE_DIR]
 
 
 @app.route("/api/file")
@@ -228,6 +231,7 @@ def api_file():
 def api_defaults():
     return jsonify({
         "mod_dir": DEFAULT_MOD,
+        "game_dir": DEFAULT_GAME,
         "out_dir": DEFAULT_OUT,
         "grad_path": _default_gradient(),
         "cache_dir": CACHE_DIR,
@@ -238,9 +242,11 @@ def api_defaults():
 def api_state():
     mod = request.args.get("mod") or DEFAULT_MOD
     out = request.args.get("out") or DEFAULT_OUT
+    game = request.args.get("game") or DEFAULT_GAME
     info = {
-        "mod_dir": mod, "out_dir": out,
+        "mod_dir": mod, "out_dir": out, "game_dir": game,
         "mod_exists": os.path.isdir(os.path.join(mod, "map")),
+        "game_exists": os.path.isdir(os.path.join(game, "map")),
         "out_exists": os.path.isdir(out),
         "cache_exists": os.path.isfile(os.path.join(CACHE_DIR, "meta.json")),
         "cache_dir": CACHE_DIR,
@@ -252,6 +258,8 @@ def api_state():
         except Exception:
             info["cache_meta"] = None
     mp = os.path.join(mod, "definition.csv")
+    if not os.path.isfile(mp):
+        mp = os.path.join(game, "definition.csv")
     if os.path.isfile(mp):
         try:
             n = 0
@@ -274,11 +282,14 @@ def api_state():
 def api_cache_build():
     d = request.get_json(force=True, silent=True) or {}
     mod = str(d.get("mod_dir") or DEFAULT_MOD)
+    game = str(d.get("game_dir") or DEFAULT_GAME)
+    gmerge = bool(d.get("game_merge", False))
 
     def work(tid):
         try:
             from webcache import build
-            res = build(mod, CACHE_DIR, progress=lambda m: task_log(tid, m))
+            res = build(mod, CACHE_DIR, progress=lambda m: task_log(tid, m), game_dir=game,
+                        game_merge=gmerge)
             task_finish(tid, result=res)
         except Exception:
             task_finish(tid, error=traceback.format_exc())
@@ -301,6 +312,8 @@ def _run_job(d, dry, tid):
             cfg.out_dir = os.path.join(os.path.dirname(cfg.mod_dir), "地块细化输出")
         task_log(tid, "模式: %s" % ("分析(只读)" if dry else "执行(写出)"))
         task_log(tid, "mod: %s" % cfg.mod_dir)
+        if cfg.game_dir:
+            task_log(tid, "原版: %s" % cfg.game_dir)
         task_log(tid, "输出: %s" % cfg.out_dir)
         s = run(cfg, progress=lambda m: task_log(tid, m),
                 cancel=lambda: task_cancelled(tid))
@@ -347,11 +360,13 @@ def api_repair():
 def api_audit():
     d = request.get_json(force=True, silent=True) or {}
     mod = str(d.get("mod_dir") or DEFAULT_MOD)
+    game = str(d.get("game_dir") or DEFAULT_GAME)
+    gmerge = bool(d.get("game_merge", False))
 
     def work(tid):
         try:
             from province_splitter.integrity import audit
-            info = audit(mod, progress=lambda m: task_log(tid, m))
+            info = audit(mod, progress=lambda m: task_log(tid, m), game_dir=game, game_merge=gmerge)
             task_finish(tid, result=info)
         except Exception:
             task_finish(tid, error=traceback.format_exc())
