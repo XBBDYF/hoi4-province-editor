@@ -272,6 +272,42 @@ def api_file():
     return send_file(rp)
 
 
+@app.route("/api/deps")
+def api_deps():
+    import importlib.util
+    import sys as _sys
+
+    def _has(m):
+        try:
+            return importlib.util.find_spec(m) is not None
+        except Exception:
+            return False
+    return jsonify({"ok": True, "python": _sys.version.split()[0],
+                    "flask": _has("flask"), "numpy": _has("numpy"), "pillow": _has("PIL")})
+
+
+@app.route("/api/deps/install", methods=["POST"])
+def api_deps_install():
+    import subprocess
+    import sys as _sys
+    d = request.get_json(force=True, silent=True) or {}
+    mirror = (d.get("mirror") or "").strip()
+    pkgs = d.get("packages") or ["numpy", "pillow"]
+    pkgs = [str(p) for p in pkgs if str(p).strip()]
+    if not pkgs:
+        return jsonify({"ok": False, "error": "没有要安装的库"})
+    cmd = [_sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "--upgrade"] + pkgs
+    if mirror:
+        cmd += ["-i", mirror]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+        return jsonify({"ok": p.returncode == 0, "code": p.returncode,
+                        "cmd": " ".join(cmd),
+                        "out": (p.stdout or "")[-4000:], "err": (p.stderr or "")[-4000:]})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
 @app.route("/api/defaults")
 def api_defaults():
     return jsonify({
@@ -733,18 +769,14 @@ def api_edit_next_id():
     try:
         ed = _edit_params(d)
         which = d.get("which", "state")
-        txts = ed.state_txt if which == "state" else ed.sr_txt
-        mx = 0
-        import re as _re
-        for b, txt in txts.items():
-            m = _re.search(r"\bid\s*=\s*(\d+)", txt)
-            if m:
-                mx = max(mx, int(m.group(1)))
-            else:
-                mm = _re.match(r"(\d+)", b)
-                if mm:
-                    mx = max(mx, int(mm.group(1)))
-        return jsonify({"ok": True, "next": mx + 1, "count": len(txts)})
+        r = ed.next_free_id(which)
+        cnt = len(ed.recs)
+        if which == "state":
+            cnt = len(ed.state_txt)
+        elif which == "sr":
+            cnt = len(ed.sr_txt)
+        return jsonify({"ok": True, "next": r["next"], "max": r["max"],
+                        "reused": bool(r.get("reused")), "count": cnt})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
 

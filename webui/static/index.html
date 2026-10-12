@@ -37,6 +37,16 @@
         <button id="zFit" title="适应窗口">适应</button>
         <button id="z1" title="1:1">1:1</button>
       </div>
+      <div id="findbox">
+        <select id="findType" title="搜索类型">
+          <option value="prov">地块</option>
+          <option value="state">state</option>
+          <option value="sr">战略区</option>
+          <option value="continent">大洲</option>
+        </select>
+        <input id="findQuery" placeholder="搜索…" spellcheck="false">
+        <button id="findGo">查找</button>
+      </div>
       <div id="tgtBox"><h4>细化目标 <button id="btnClearTgt" class="ghost" style="float:right;padding:0 6px;line-height:1" title="清除目标">×</button></h4><div id="tgtBody"></div></div>
       <div id="legend"><h4>图例</h4><div id="legendBody"></div></div>
       <div id="tooltip"></div>
@@ -58,7 +68,6 @@
       <button data-tab="refine">细化</button>
       <button data-tab="audit">检查</button>
       <button data-tab="edit">编辑</button>
-      <button data-tab="prov">省份</button>
       <button data-tab="report">报告</button>
     </nav>
     <div class="panes">
@@ -68,13 +77,32 @@
         <fieldset><legend>地图信息</legend>
           <div id="mapInfo" class="tiny">尚未加载缓存。</div>
         </fieldset>
-        <fieldset><legend>定位 / 查询</legend>
+        <fieldset><legend>数据来源 / 参考</legend>
           <div class="row">
-            <input id="gotoId" placeholder="输入省份 ID" style="width:120px">
-            <button id="btnGoto">定位省份</button>
+            <label>参考</label>
+            <select id="edRef" style="flex:1">
+              <option value="mod">mod 原文件</option>
+              <option value="output">output 输出</option>
+            </select>
+          </div>
+          <div class="row">
             <button id="btnClearSel" class="ghost">清除选中</button>
           </div>
-          <p class="hint">地图上：滚轮缩放（以光标为中心），拖动平移，单击选中省份，悬停查看信息。</p>
+          <p class="hint">地图上：滚轮缩放（以光标为中心），拖动平移，单击选中省份，悬停查看信息。右上角可搜索定位。</p>
+        </fieldset>
+        <fieldset><legend>运行环境 / 依赖库</legend>
+          <div id="depInfo" class="tiny">检查中…</div>
+          <div class="row">
+            <select id="depMirror" style="flex:1" title="pip 下载源">
+              <option value="">官方 PyPI (pypi.org)</option>
+              <option value="https://pypi.tuna.tsinghua.edu.cn/simple">清华 TUNA</option>
+              <option value="https://mirrors.aliyun.com/pypi/simple/">阿里云</option>
+              <option value="https://mirrors.cloud.tencent.com/pypi/simple">腾讯云</option>
+              <option value="https://pypi.mirrors.ustc.edu.cn/simple/">中科大 USTC</option>
+            </select>
+            <button id="depInstall">一键安装缺少的库</button>
+            <button id="depRecheck" class="ghost">重新检测</button>
+          </div>
         </fieldset>
         <fieldset><legend>图例图层</legend>
           <div class="row">
@@ -146,11 +174,6 @@
             <option value="rail">铁路 / 补给</option>
             <option value="terrain">地块地形</option>
           </select>
-          <label>参考</label>
-          <select id="edRef">
-            <option value="mod">mod 原文件</option>
-            <option value="output">output 输出</option>
-          </select>
         </div>
         <fieldset><legend>操作方式</legend>
           <div id="edTarget" class="tiny" style="color:var(--accent)">当前目标：未选择</div>
@@ -202,29 +225,17 @@
         <fieldset id="fsNewSr" style="display:none"><legend>新建战略区</legend>
           <div class="row"><input id="nsrId" type="number" placeholder="战略区ID" style="flex:1"><button id="edNewSrCreate" class="primary">用当前选中地块 新建战略区</button></div>
         </fieldset>
+        <fieldset><legend>下一个可用 ID（按当前数据实时核对）</legend>
+          <div id="nextIdInfo" class="tiny">—</div>
+          <div class="row"><button id="btnCheckIds" class="ghost">重新核对</button></div>
+        </fieldset>
         <fieldset><legend>撤销 / 导出</legend>
           <div class="row"><button id="edUndo">撤销</button><button id="edRedo">重做</button><button id="edReset">重置</button><button id="edExport" class="primary">导出到输出目录</button></div>
           <div id="edOps" class="tiny" style="max-height:140px;overflow:auto;white-space:pre-wrap">—</div>
         </fieldset>
       </section>
 
-      <!-- 省份 -->
-      <section class="pane" data-pane="prov">
-        <div class="row" style="margin-bottom:8px">
-          <input id="pFilter" placeholder="筛选：ID / 类型 / 大洲 / state / 战略区" style="flex:1">
-          <label class="check"><input type="checkbox" id="pLandOnly">仅陆地</label>
-        </div>
-        <div id="pCount" class="tiny"></div>
-        <div class="tblwrap"><table class="tbl" id="provTable">
-          <thead><tr>
-            <th data-k="id">ID</th><th>色</th><th data-k="area" class="num">面积</th>
-            <th data-k="type">类型</th><th data-k="continent">大洲</th>
-            <th data-k="state">state</th><th data-k="sr">战略区</th>
-          </tr></thead><tbody></tbody>
-        </table></div>
-      </section>
-
-      <!-- 报告 -->
+<!-- 报告 -->
       <section class="pane" data-pane="report">
         <div class="toolbar">
           <button data-rep="csv">report.csv</button>

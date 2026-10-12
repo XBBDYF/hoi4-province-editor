@@ -326,6 +326,29 @@ def fix_adjacencies(text: str, nb, children, canals_idx=None):
             out.append(raw)
             continue
         if th <= 0:
+            # 无 Through 的相邻对(典型: impassable / adjacency_rule 行): 拆分后也要重映射到真正相邻的子块
+            if f in children or t in children:
+                fset = [f] + list(children.get(f, []))
+                tset = [t] + list(children.get(t, []))
+                best, best_score = None, -1
+                for fp in fset:
+                    ent = nb.get(fp)
+                    for tp in tset:
+                        if fp == tp:
+                            continue
+                        if hasattr(ent, "get"):
+                            sc = int(ent.get(tp, 0))
+                        else:
+                            sc = 1 if (ent and tp in ent) else 0
+                        if sc > best_score:
+                            best_score, best = sc, (fp, tp)
+                if best and best_score >= 1 and best != (f, t):
+                    c[0] = str(best[0]); c[1] = str(best[1])
+                    out.append(";".join(c))
+                    changed += 1
+                    fixed_rows.append((f, t, th, best))
+                    continue
+                unfixed.append((f, t, th, c[2]))
             out.append(raw)
             continue
         if (len(c) >= 10 and not c[8].strip()
@@ -558,11 +581,64 @@ def audit(mod_dir: str, progress=None, game_dir: str = "", game_merge: bool = Fa
     log("检查地块连通性 ...")
     disc, disc_frag = count_disconnected(pid)
 
+    log("检查 州 / 战略区 连续性 ...")
+
+    def _components(ids, graph):
+        ids = set(ids)
+        seen = set()
+        comp = 0
+        for s in ids:
+            if s in seen:
+                continue
+            comp += 1
+            stack = [s]
+            seen.add(s)
+            while stack:
+                u = stack.pop()
+                for v in graph.get(u, ()):
+                    if v in ids and v not in seen:
+                        seen.add(v)
+                        stack.append(v)
+        return comp
+
+    def _contig_split(texts):
+        out = []
+        for fp, txt in texts.items():
+            ids = set(x for x in (parse_provinces(txt) or []) if x in valid)
+            if not ids:
+                continue
+            n = _components(ids, nb_all)
+            if n > 1:
+                out.append([os.path.basename(fp), n, len(ids)])
+        return out
+
+    st_split = _contig_split(stt)
+    sr_split = _contig_split(srt)
+
+    # 不可通行(impassable)异常统计(仅预警)
+    imp_rows = imp_bad = 0
+    for _i, _ln in enumerate(at0.split("\n")):
+        _cc = _ln.rstrip("\r").split(";")
+        if _i == 0 or len(_cc) < 4 or not _cc[0].strip().lstrip("-").isdigit():
+            continue
+        if (_cc[2] or "").strip().lower() == "impassable":
+            imp_rows += 1
+            try:
+                _f, _t = int(_cc[0]), int(_cc[1])
+                if _f not in valid or _t not in valid:
+                    imp_bad += 1
+            except ValueError:
+                imp_bad += 1
+
     return dict(
         provinces=len(definition.recs),
         adjacency_pairs=len(pairs),
         crossings=_count_crossings(pid),
         disconnected=disc, disconnect_fragments=disc_frag,
+        state_split=len(st_split), sr_split=len(sr_split),
+        impassable_rows=imp_rows, impassable_bad=imp_bad,
+        adjacencies_src=(_at_p or "(无)"),
+        state_split_items=st_split[:20], sr_split_items=sr_split[:20],
         sr_files=len(srf), sr_dup=len(srdup), sr_invalid=len(srinv),
         state_files=len(stf), state_dup=len(stdup), state_invalid=len(stinv),
         railway_lines=rlines, railway_broken_lines=rbroken, railway_broken_pairs=rbad,

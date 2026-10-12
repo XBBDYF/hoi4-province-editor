@@ -22,6 +22,41 @@ import os
 import re
 
 import numpy as np
+
+
+def _trace_polyline(pts, maxpts=32, maxsteps=8000):
+    """把无序边界像素点集串成一条折线(贪心沿邻域走), 并等距下采样。"""
+    st = set(pts)
+    if not st:
+        return []
+    if len(st) == 1:
+        p = next(iter(st)); return [[int(p[0]), int(p[1])]]
+    order = []
+    cur = min(st, key=lambda q: (q[1], q[0]))
+    remain = set(st); remain.discard(cur); order.append(cur)
+    ring = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1) if dx or dy]
+    ring2 = [(dx, dy) for dx in (-2, -1, 0, 1, 2) for dy in (-2, -1, 0, 1, 2) if dx or dy]
+    steps = 0
+    while remain and steps < maxsteps:
+        steps += 1
+        cx, cy = cur
+        nxt = None
+        for dx, dy in ring:
+            q = (cx + dx, cy + dy)
+            if q in remain:
+                nxt = q; break
+        if nxt is None:
+            for dx, dy in ring2:
+                q = (cx + dx, cy + dy)
+                if q in remain:
+                    nxt = q; break
+        if nxt is None:
+            nxt = next(iter(remain))
+        remain.discard(nxt); order.append(nxt); cur = nxt
+    if len(order) > maxpts:
+        step = (len(order) - 1) / float(maxpts - 1)
+        order = [order[int(round(i * step))] for i in range(maxpts)]
+    return [[int(q[0]), int(q[1])] for q in order]
 from PIL import Image
 
 from province_splitter.core import (read_definition, load_provinces_bmp, save_provinces_bmp,
@@ -496,6 +531,73 @@ class Editor:
                 raise ValueError("找不到可并入的邻居")
         return self.do_merge(int(into), [pid])
 
+    def _region_id(self, base, txt):
+        m = re.search(r"\bid\s*=\s*(\d+)", txt or "")
+        if m:
+            return int(m.group(1))
+        mm = re.match(r"(\d+)", base or "")
+        return int(mm.group(1)) if mm else None
+
+    def _count_provinces(self, txt):
+        m = re.search(r"provinces\s*=\s*\{([^}]*)\}", txt or "", re.S)
+        if not m:
+            return 0
+        return len(re.findall(r"\d+", m.group(1)))
+
+    def _region_ids(self, texts):
+        out = {}
+        for b, txt in texts.items():
+            i = self._region_id(b, txt)
+            if i is None:
+                continue
+            out.setdefault(i, []).append((b, self._count_provinces(txt)))
+        return out
+
+    def next_free_id(self, level="state"):
+        """优先复用空闲 ID(编号空缺, 或文件存在但地块为空), 否则用最大编号+1。"""
+        if level == "prov":
+            used = set()
+            for k in self.recs:
+                try:
+                    used.add(int(k))
+                except Exception:
+                    pass
+            mx = max(used) if used else 0
+            nid = mx + 1
+            for i in range(1, mx + 1):
+                if i not in used:
+                    nid = i
+                    break
+            return {"next": nid, "max": mx, "reused": nid <= mx}
+        if level == "continent":
+            used = set()
+            for k, r in self.recs.items():
+                if r[4] == "sea":
+                    continue
+                try:
+                    used.add(int(r[7]))
+                except Exception:
+                    pass
+            mx = max(used) if used else 0
+            nid = mx + 1
+            for i in range(1, mx + 1):
+                if i not in used:
+                    nid = i
+                    break
+            return {"next": nid, "max": mx, "reused": nid <= mx}
+        texts = self.state_txt if level == "state" else self.sr_txt
+        ids = self._region_ids(texts)
+        mx = max(ids) if ids else 0
+        nid = mx + 1
+        reused = False
+        for i in range(1, mx + 1):
+            lst = ids.get(i)
+            if not lst or all(n == 0 for (_b, n) in lst):
+                nid = i
+                reused = True
+                break
+        return {"next": nid, "max": mx, "reused": reused}
+
     def do_new_state(self, sid, provinces, owner="", manpower=0, category="rural",
                      infrastructure=0, industrial_complex=0, arms_factory=0, dockyard=0,
                      buildings=None, resources=None, mlf=1.0):
@@ -505,27 +607,22 @@ class Editor:
         bad = [p for p in provinces if self._type(p) == "sea"]
         if bad:
             raise ValueError("海洋地块不能加入州: %s" % bad[:5])
-        # 下一个州 ID
-        maxid = 0
-        for b, txt in self.state_txt.items():
-            m = re.search(r"\bid\s*=\s*(\d+)", txt)
-            if m:
-                maxid = max(maxid, int(m.group(1)))
-            else:
-                mm = re.match(r"(\d+)", b)
-                if mm:
-                    maxid = max(maxid, int(mm.group(1)))
         try:
             sid = int(sid) if str(sid).strip() not in ("", "0") and sid is not None else 0
         except (TypeError, ValueError):
             sid = 0
+        _ids = self._region_ids(self.state_txt)
         if not sid:
-            sid = maxid + 1
-        for b, txt in self.state_txt.items():
-            m = re.search(r"\bid\s*=\s*(\d+)", txt)
-            if (m and int(m.group(1)) == sid) or re.match(r"^%d-" % sid, b):
-                raise ValueError("州ID %d 已被占用" % sid)
-        fname = "%d-State_%d.txt" % (sid, sid)
+            sid = self.next_free_id("state")["next"]
+        if any(n > 0 for (_b, n) in _ids.get(sid, [])):
+            raise ValueError("州ID %d 已被占用；下一个可用: %d" % (sid, self.next_free_id("state")["next"]))
+        fname = None
+        for (_b, n) in _ids.get(sid, []):
+            if n == 0:                      # 复用存在但为空的州文件
+                fname = _b
+                break
+        if not fname:
+            fname = "%d-State_%d.txt" % (sid, sid)
         bl = dict(buildings or {})
         for k, v in (("industrial_complex", industrial_complex), ("arms_factory", arms_factory),
                      ("dockyard", dockyard)):
@@ -557,27 +654,23 @@ class Editor:
         provinces = [int(x) for x in provinces if int(x) in self.recs]
         if not provinces:
             raise ValueError("至少要有 1 个地块")
-        maxid = 0
-        for b, txt in self.sr_txt.items():
-            m = re.search(r"\bid\s*=\s*(\d+)", txt)
-            if m:
-                maxid = max(maxid, int(m.group(1)))
-            else:
-                mm = re.match(r"(\d+)", b)
-                if mm:
-                    maxid = max(maxid, int(mm.group(1)))
         try:
             sid = int(sid) if str(sid).strip() not in ("", "0") and sid is not None else 0
         except (TypeError, ValueError):
             sid = 0
+        _ids = self._region_ids(self.sr_txt)
         if not sid:
-            sid = maxid + 1
-        for b, txt in self.sr_txt.items():
-            m = re.search(r"\bid\s*=\s*(\d+)", txt)
-            if (m and int(m.group(1)) == sid) or re.match(r"^%d-" % sid, b):
-                raise ValueError("战略区ID %d 已被占用" % sid)
+            sid = self.next_free_id("sr")["next"]
+        if any(n > 0 for (_b, n) in _ids.get(sid, [])):
+            raise ValueError("战略区ID %d 已被占用；下一个可用: %d" % (sid, self.next_free_id("sr")["next"]))
         nm = "STRATEGICREGION_%d" % sid
-        fname = "%d-%d.txt" % (sid, sid)
+        fname = None
+        for (_b, n) in _ids.get(sid, []):
+            if n == 0:                      # 复用存在但为空的战略区文件
+                fname = _b
+                break
+        if not fname:
+            fname = "%d-%d.txt" % (sid, sid)
         prov = "".join("\t\t%d\n" % p for p in provinces)
         text = _SR_BODY.format(id=sid, name=nm, prov=prov)
         op = {"kind": "new_sr", "file": fname, "text": text, "id": sid}
@@ -627,9 +720,53 @@ class Editor:
         self._apply(op)
         return op
 
+    def _border_polylines(self, pairs, maxpts=32):
+        """为每对省 (f,t) 生成沿两省公共边界的折线(province.bmp 像素坐标), 返回 {(lo,hi): [[x,y],...]}。"""
+        import numpy as _np
+        want = {}
+        ids = set()
+        for (f, t) in pairs:
+            f = int(f); t = int(t)
+            if f == t or f <= 0 or t <= 0:
+                continue
+            lo, hi = (f, t) if f < t else (t, f)
+            want[lo * 1000000 + hi] = (lo, hi)
+            ids.add(lo); ids.add(hi)
+        if not want:
+            return {}
+        pid = self.pid
+        idarr = _np.fromiter(ids, dtype=_np.int64, count=len(ids))
+        wkeys = _np.fromiter(want.keys(), dtype=_np.int64, count=len(want))
+        acc = {}
+        for (A, B, dx, dy) in ((pid[:, :-1], pid[:, 1:], 1, 0), (pid[:-1, :], pid[1:, :], 0, 1)):
+            A2 = A.astype(_np.int64); B2 = B.astype(_np.int64)
+            m = (A > 0) & (B > 0) & (A != B)
+            if not m.any():
+                continue
+            m = m & (_np.isin(A2, idarr) & _np.isin(B2, idarr))
+            if not m.any():
+                continue
+            lo = _np.minimum(A2, B2)[m]; hi = _np.maximum(A2, B2)[m]
+            keys = lo * 1000000 + hi
+            ys, xs = _np.nonzero(m)
+            keep = _np.isin(keys, wkeys, assume_unique=False)
+            for k, x0, y0 in zip(keys[keep].tolist(), xs[keep].tolist(), ys[keep].tolist()):
+                lst = acc.setdefault(k, [])
+                lst.append((x0, y0))
+                lst.append((x0 + dx, y0 + dy))
+        out = {}
+        for k, pts in acc.items():
+            out[want[k]] = _trace_polyline(pts, maxpts)
+        return out
+
     def _land_adj(self):
-        if getattr(self, "_ladj", None) is not None:
+        try:
+            _sig = (int(self.pid.shape[0]), int(self.pid.shape[1]), int(self.pid.sum()))
+        except Exception:
+            _sig = None
+        if getattr(self, "_ladj", None) is not None and getattr(self, "_ladj_sig", None) == _sig:
             return self._ladj
+        self._ladj_sig = _sig
         import collections as _c
         land = set(p for p, r in self.recs.items() if r[4] == "land")
         adj = _c.defaultdict(set)
@@ -677,6 +814,16 @@ class Editor:
                         edges.append({"type": kind, "a": f, "b": t2_})
         for (ba, bb) in blocked:                        # impassable: 从像素邻接中剔除
             adj[ba].discard(bb); adj[bb].discard(ba)
+        try:
+            _prs = [(e["a"], e["b"]) for e in edges if e.get("type") == "impassable"]
+            _bp = self._border_polylines(_prs) if _prs else {}
+            for e in edges:
+                if e.get("type") == "impassable":
+                    a0, b0 = int(e["a"]), int(e["b"])
+                    lo, hi = (a0, b0) if a0 < b0 else (b0, a0)
+                    e["path"] = _bp.get((lo, hi), [])
+        except Exception:
+            pass
         self._ladj = adj
         self._adj_edges = edges
         return adj

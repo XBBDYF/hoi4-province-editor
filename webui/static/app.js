@@ -57,6 +57,22 @@ const PROG_STEP = [
   [/战略区/i, 50], [/着色层/i, 62], [/面积|prov_index/i, 78], [/中心|连线/i, 88], [/完成|导出完成/i, 100],
 ];
 let _progTimer = null;
+const _logState = new Map();
+function _logAppend(el, m) {
+  if (!el) return;
+  let st = _logState.get(el);
+  if (!st) { st = { buf: [], raf: 0 }; _logState.set(el, st); }
+  st.buf.push(String(m));
+  if (st.raf) return;
+  st.raf = requestAnimationFrame(() => {
+    st.raf = 0;
+    let t = el.textContent + st.buf.join('\n') + '\n';
+    st.buf.length = 0;
+    if (t.length > 120000) t = t.slice(t.length - 120000);
+    el.textContent = t;
+    el.scrollTop = el.scrollHeight;
+  });
+}
 function progShow(title) {
   const el = document.getElementById('bigProg'); if (!el) return;
   const ti = document.getElementById('bpTitle'); if (ti) ti.textContent = title || '处理中…';
@@ -66,10 +82,14 @@ function progShow(title) {
 }
 function progStep(msg) {
   const el = document.getElementById('bigProg'); if (!el || !el.classList.contains('on')) return;
-  const tx = document.getElementById('bpTxt'); if (tx) tx.textContent = String(msg || '');
-  let pct = null;
-  for (const [re, v] of PROG_STEP) { if (re.test(String(msg || ''))) pct = v; }
+  const s0 = String(msg || '');
+  const tx = document.getElementById('bpTxt'); if (tx) tx.textContent = s0;
   const b = document.getElementById('bpBar');
+  let pct = null;
+  let mm = s0.match(/(\d+)\s*\/\s*(\d+)/);
+  if (mm && +mm[2] > 0) pct = Math.max(1, Math.min(99, Math.round(100 * (+mm[1]) / (+mm[2]))));
+  if (pct == null) { mm = s0.match(/(\d{1,3}(?:\.\d+)?)\s*%/); if (mm) pct = Math.max(1, Math.min(100, Math.round(+mm[1]))); }
+  if (pct == null) for (const [re, v] of PROG_STEP) { if (re.test(s0)) pct = v; }
   if (b && pct != null) { b.parentElement.classList.remove('indet'); b.style.width = pct + '%'; }
 }
 function progHide() {
@@ -481,9 +501,11 @@ function provinceAtWorld(wx, wy) {
 }
 
 function setupMapEvents() {
+  if (MapView.eventsBound) return;   // 防止 boot() 多次调用导致监听器重复绑定(点一次弹多次)
+  MapView.eventsBound = true;
   const area = $('#maparea'), c = MapView.canvas;
   clampCam();
-  const _uiHit = (e) => e.target && e.target.closest && e.target.closest('#layers,#maptools,#legend,#tgtBox,#tooltip');
+  const _uiHit = (e) => e.target && e.target.closest && e.target.closest('#layers,#maptools,#findbox,#legend,#tgtBox,#tooltip');
   area.addEventListener('wheel', (e) => {
     if (_uiHit(e)) return;
     e.preventDefault();
@@ -688,6 +710,86 @@ function locateProvince(id) {
 /* ------------------------------------------------------------------ */
 /* 图例                                                                */
 /* ------------------------------------------------------------------ */
+async function depCheck() {
+  const el = $('#depInfo');
+  try {
+    const r = await fetch('/api/deps').then(r => r.json());
+    if (!r.ok) { if (el) el.textContent = '检测失败: ' + (r.error || ''); return; }
+    const miss = [];
+    if (!r.flask) miss.push('flask');
+    if (!r.numpy) miss.push('numpy');
+    if (!r.pillow) miss.push('pillow(PIL)');
+    window._depMissing = miss;
+    if (el) el.innerHTML = 'Python <b>' + r.python + '</b> · flask ' + (r.flask ? '✅' : '❌') +
+      ' · numpy ' + (r.numpy ? '✅' : '❌') + ' · Pillow ' + (r.pillow ? '✅' : '❌') +
+      (miss.length ? '　<b style="color:#ffd23f">缺少: ' + miss.join(', ') + '</b>（选好源后点"一键安装"）' : '　全部就绪 ✅');
+  } catch (e) { if (el) el.textContent = '检测失败: ' + e.message; }
+}
+async function depInstall() {
+  const el = $('#depInfo');
+  const miss = window._depMissing || [];
+  if (!miss.length) { setMsg('依赖已齐全，无需安装'); depCheck(); return; }
+  const pkgs = miss.map(m => m.indexOf('pillow') === 0 ? 'pillow' : m);
+  const mirror = $('#depMirror') ? $('#depMirror').value : '';
+  if (el) el.textContent = '正在安装 ' + pkgs.join(', ') + '（' + (mirror || '官方源') + '）… 请稍候（可能 1-2 分钟）';
+  try {
+    const r = await fetch('/api/deps/install', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ packages: pkgs, mirror: mirror || null }),
+    }).then(r => r.json());
+    if (r.ok) { setMsg('依赖安装完成'); } else {
+      setMsg('安装失败: ' + (r.error || ('pip 退出码 ' + r.code)));
+      if (el) el.innerHTML = '安装失败（可换一个镜像源重试）：<br><span style="color:#ff9aa2">' +
+        String(r.err || r.out || r.error || '').slice(-600) + '</span>';
+    }
+  } catch (e) { setMsg('安装失败: ' + e.message); }
+  depCheck();
+}
+const FIND_CN = { prov: '地块', state: 'state', sr: '战略区', continent: '大洲' };
+function _regionNum(v) { const m = String(v || '').match(/^(\d+)/); return m ? Number(m[1]) : null; }
+function fitToIds(ids) {
+  const C = App.centers || {};
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, n = 0;
+  for (const id of ids) {
+    const c = C[String(id)]; if (!c) continue;
+    n++;
+    if (c[0] < x0) x0 = c[0]; if (c[0] > x1) x1 = c[0];
+    if (c[1] < y0) y0 = c[1]; if (c[1] > y1) y1 = c[1];
+  }
+  if (!n || !MapView.cam) return;
+  const area = $('#maparea'); const W = area.clientWidth, H = area.clientHeight;
+  const bw = Math.max(x1 - x0, 8), bh = Math.max(y1 - y0, 8);
+  let sc = Math.min((W - 80) / bw, (H - 80) / bh);
+  sc = Math.max(0.15, Math.min(50, sc));
+  MapView.cam.s = sc;
+  MapView.cam.x = W / 2 - sc * (x0 + x1) / 2;
+  MapView.cam.y = H / 2 - sc * (y0 + y1) / 2;
+  if (typeof clampCam === 'function') clampCam();
+  if (typeof updZoom === 'function') updZoom();
+  requestDraw();
+}
+function doFind() {
+  const q = ($('#findQuery') ? $('#findQuery').value : '').trim();
+  const type = ($('#findType') ? $('#findType').value : 'prov') || 'prov';
+  if (!q) return;
+  const rows = App.provs || [];
+  const num = /^\d+$/.test(q) ? Number(q) : null;
+  const ql = q.toLowerCase();
+  let hits = [];
+  if (type === 'prov')         hits = rows.filter(r => String(r.id) === q);
+  else if (type === 'state')   hits = rows.filter(r => num != null ? _regionNum(r.state) === num : String(r.state || '').toLowerCase().indexOf(ql) >= 0);
+  else if (type === 'sr')      hits = rows.filter(r => num != null ? _regionNum(r.sr) === num : String(r.sr || '').toLowerCase().indexOf(ql) >= 0);
+  else                         hits = rows.filter(r => num != null ? Number(r.continent) === num : contName(r).toLowerCase().indexOf(ql) >= 0);
+  if (!hits.length) { setMsg('未找到匹配：' + q + '（' + (FIND_CN[type] || type) + '，按编号精确匹配）'); buildESel([]); return; }
+  hits.sort((a, b) => a.id - b.id);
+  const ids = hits.map(r => r.id);
+  App.findIds = ids;
+  buildESel(ids);            // 标记所有命中的地块
+  fitToIds(ids);             // 缩放到命中范围
+  App.sel = ids[0];
+  edSelInfo && edSelInfo();
+  setMsg('匹配 ' + hits.length + ' 个' + (FIND_CN[type] || '') + '（编号 ' + q + '），已全部标出' + (hits.length > 1 ? '并缩放到范围' : ''));
+}
 function showLegend(kind) {
   const names = (App.regions && App.regions[kind]) || [];
   const p = pal(Math.max(names.length, 1));
@@ -854,7 +956,7 @@ async function doEditExport() {
   if (!confirm('导出编辑结果到输出目录：\n' + cfg.out_dir + '\n并重建地图缓存？')) return;
   const log = $('#edOps'); log.textContent = '';
   await runJob('/api/edit/export', cfg, {
-    onLog: (m) => { log.textContent += m + '\n'; log.scrollTop = log.scrollHeight; },
+    onLog: (m) => { _logAppend(log, m); },
     onDone: async (res) => {
       log.textContent += `\n=== 导出完成: 移除 ${(res.removed || []).length} 个省份, 操作 ${res.ops} 个, ID 重命名 ${res.renamed} 处 ===`;
       setMsg('编辑已导出, 地图已刷新');
@@ -1031,10 +1133,18 @@ function edIndexBy() {
 async function edFillNextIds() {
   try {
     const q = new URLSearchParams(collectCfg()).toString();
-    const a = await fetch('/api/edit/next_id?' + q + '&which=state').then(r => r.json());
-    const b = await fetch('/api/edit/next_id?' + q + '&which=sr').then(r => r.json());
+    const [a, b, c] = await Promise.all([
+      fetch('/api/edit/next_id?' + q + '&which=state').then(r => r.json()),
+      fetch('/api/edit/next_id?' + q + '&which=sr').then(r => r.json()),
+      fetch('/api/edit/next_id?' + q + '&which=prov').then(r => r.json()),
+    ]);
     if (a.ok && $('#nsId')) $('#nsId').value = a.next;
-    if (b.ok && $('#nsrId')) $('#nsrId').value = b.next;
+    if (b.ok && $('#nsrId') && !$('#nsrId').value) $('#nsrId').value = b.next;
+    const info = $('#nextIdInfo');
+    if (info) {
+      const f = (x, nm) => nm + ' ' + (x.ok ? (x.next + (x.reused ? '（复用空闲）' : '')) : '?');
+      info.textContent = f(a, '州') + ' · ' + f(b, '战略区') + ' · ' + f(c, '省份') + '（空闲ID优先复用；创建前会再核对一次）';
+    }
   } catch (e) { }
 }
 
@@ -1297,9 +1407,20 @@ function _drawAdjEdges(ctx) {
   const st = { strait: ['#33d6ff', [7, 5]], canal: ['#ffd23f', [3, 4]], impassable: ['#ff4d4d', [2, 7]] };
   ctx.save(); ctx.lineWidth = 1.8; ctx.lineCap = 'round';
   for (const e of E) {
+    const stl = st[e.type] || ['#9aa0a6', [3, 3]];
+    const P = e.path;
+    if (e.type === 'impassable' && P && P.length > 1) {
+      // 不可通行: 沿两省公共边界的屏障折线(细化后会按新省界重算并重画)
+      ctx.setLineDash([]); ctx.strokeStyle = '#ff3b3b'; ctx.lineWidth = 2.6;
+      ctx.beginPath();
+      ctx.moveTo(x + P[0][0] * s, y + P[0][1] * s);
+      for (let k = 1; k < P.length; k++) ctx.lineTo(x + P[k][0] * s, y + P[k][1] * s);
+      ctx.stroke();
+      ctx.lineWidth = 1.8;
+      continue;
+    }
     const a = C[String(e.a)], b = C[String(e.b)];
     if (!a || !b) continue;
-    const stl = st[e.type] || ['#9aa0a6', [3, 3]];
     ctx.setLineDash(stl[1]); ctx.strokeStyle = stl[0];
     ctx.beginPath();
     ctx.moveTo(x + a[0] * s, y + a[1] * s);
@@ -1505,9 +1626,20 @@ async function edSaveStateData() {
 
 async function edCreateNewSr() {
   if (!App.editSel.length) { setMsg('先选中要放进新战略区的地块'); return; }
-  const r = await editPost('/api/edit/new_sr', { id: Number(($('#nsrId') ? $('#nsrId').value : 0) || 0), provinces: App.editSel.slice() });
+  let sid = Number(($('#nsrId') ? $('#nsrId').value : 0) || 0);
+  let _reused = false;
+  try {                                    // 创建前按当前数据核对 ID(空闲ID优先)
+    const q = new URLSearchParams(collectCfg()).toString();
+    const nx = await fetch('/api/edit/next_id?' + q + '&which=sr').then(r => r.json());
+    if (nx.ok) {
+      if (!sid || sid < nx.next) { if (sid && sid > 0) setMsg('战略区 ID ' + sid + ' 已被占用或过小，改用 ' + nx.next); sid = nx.next; }
+      if (sid === nx.next) _reused = !!nx.reused;
+      if ($('#nsrId')) $('#nsrId').value = sid;
+    }
+  } catch (e) { }
+  const r = await editPost('/api/edit/new_sr', { id: sid, provinces: App.editSel.slice() });
   if (r.ok) {
-    setMsg('新建战略区 ' + r.file);
+    setMsg('新建战略区 ' + r.file + '（ID=' + sid + (_reused ? '，复用空闲ID' : '') + '）');
     App.editSel = []; renderEditSel(); edSelInfo(); buildESel();
     showEditOps(r.status);
     await edReplay(r.status.ops);
@@ -1625,7 +1757,7 @@ async function loadIndex() {
 
 let provSort = { k: 'id', dir: 1 };
 function renderProvTable() {
-  if (!App.provs.length) return;
+  if (!$('#provTable') || !App.provs.length) return;
   const q = ($('#pFilter').value || '').trim().toLowerCase();
   const landOnly = $('#pLandOnly').checked;
   let rows = App.provs;
@@ -1710,7 +1842,7 @@ async function doRun() {
   $('#runSummary').textContent = '运行中…';
   $('#previews').textContent = '运行中…';
   activeJob.run = await runJob('/api/run', cfg, {
-    onLog: (m) => { const l = $('#log'); l.textContent += m + '\n'; l.scrollTop = l.scrollHeight; },
+    onLog: (m) => { _logAppend($('#log'), m); },
     onDone: (res) => {
       setBusy('run', false);
       renderRunResult(res);
@@ -1773,7 +1905,7 @@ async function doRepair() {
   $('#repSpinner').style.display = 'inline-flex';
   const log = $('#repairLog'); log.textContent = '';
   await runJob('/api/repair', cfg, {
-    onLog: (m) => { log.textContent += m + '\n'; log.scrollTop = log.scrollHeight; },
+    onLog: (m) => { _logAppend(log, m); },
     onDone: async (res) => {
       $('#btnRepair').disabled = false; $('#btnAudit').disabled = false;
       $('#repSpinner').style.display = 'none';
@@ -1793,7 +1925,9 @@ async function doRepair() {
 
 const AUDIT_CN = {
   provinces: '省份总数', adjacency_pairs: '相邻对', crossings: '十字交叉',
-  disconnected: '不连通地块', disconnect_fragments: '孤立碎片',
+  disconnected: '地块不连通', disconnect_fragments: '孤立碎片',
+  state_split: '州不连续', sr_split: '战略区不连续',
+  impassable_rows: '不可通行条目(地图自带,仅供参考)', impassable_bad: '不可通行异常',
   sr_files: '战略区文件', sr_dup: '战略区重复归属', sr_invalid: '战略区无效ID',
   state_files: '州文件', state_dup: '州重复归属', state_invalid: '州无效ID',
   railway_lines: '铁路线', railway_broken_lines: '铁路断连行', railway_broken_pairs: '断连区段',
@@ -1804,18 +1938,25 @@ const AUDIT_CN = {
   ref_vp_total: '胜利点引用', ref_vp_invalid: '胜利点悬空引用',
 };
 function renderAudit(info) {
-  const bad = (k) => /dup|invalid|broken|bad|crossings|disconnected|fragments|missing/.test(k);
-  let html = '';
+  const bad = (k) => /dup|invalid|broken|bad|crossings|disconnected|fragments|missing|split/.test(k);
+  const WARN = /^(adjacency_bad|impassable_bad|impassable_rows|canal_missing|canal_rules_unresolved|canal_required_provinces_to_remove|canal_bank_provinces_to_add)$/;
+  let html = '<p class="hint">红色=需要处理；黄色=海峡/运河/不可通行预警，仅供参考，需<b>手动</b>修复。</p>';
   for (const k of Object.keys(info)) {
-    if (k.endsWith('_items') || k === 'adjacency_bad_rows') continue;
-    const cls = bad(k) && info[k] > 0 ? 'bad' : (bad(k) ? 'ok' : '');
+    if (k.endsWith('_items') || k.endsWith('_src') || k === 'adjacency_bad_rows' || k === 'ref_invalid_examples') continue;
+    let cls = '';
+    if (WARN.test(k)) cls = info[k] > 0 ? 'warn' : 'ok';
+    else if (bad(k)) cls = info[k] > 0 ? 'bad' : 'ok';
     html += `<div class="stat"><span>${AUDIT_CN[k] || k}</span><span class="badge ${cls}">${info[k]}</span></div>`;
   }
   const dupSr = info.sr_dup_items || [], dupSt = info.state_dup_items || [], ab = info.adjacency_bad_rows || [];
+  const stSplit = info.state_split_items || [], srSplit = info.sr_split_items || [];
   const list = (title, arr, f) => arr.length ? `<div style="margin-top:8px"><b>${title}</b><div class="tiny">${arr.slice(0, 12).map(f).join('<br>')}</div></div>` : '';
   html += list('战略区重复示例', dupSr, ([i, fs]) => `#${i} → ${fs.map(x => x.split(/[\\/]/).pop()).join(', ')}`);
   html += list('州重复示例', dupSt, ([i, fs]) => `#${i} → ${fs.map(x => x.split(/[\\/]/).pop()).join(', ')}`);
-  html += list('海峡/运河异常示例', ab, ([f, t, th, ty]) => `${f};${t};${ty};${th}`);
+  if (info.adjacencies_src) html += `<div class="tiny" style="margin-top:6px">海峡/运河/不可通行 统计来源：<b>${info.adjacencies_src}</b></div>`;
+  html += list('海峡/运河/不可通行异常示例（黄色预警，仅供参考，需手动修复）', ab, ([f, t, th, ty]) => `${f};${t};${ty};${th}`);
+  html += list('州不连续示例（州内省份未连成一片）', stSplit, ([f, n, c]) => `${f} → ${n} 片 / ${c} 块`);
+  html += list('战略区不连续示例', srSplit, ([f, n, c]) => `${f} → ${n} 片 / ${c} 块`);
   $('#auditBody').innerHTML = html;
 }
 
@@ -1939,9 +2080,9 @@ function initUI() {
   $('#zFit').onclick = fitView;
   $('#z1').onclick = () => { const a = $('#maparea'); MapView.cam.s = 1; MapView.cam.x = a.clientWidth / 2 - MapView.W / 2; MapView.cam.y = a.clientHeight / 2 - MapView.H / 2; updZoom(); requestDraw(); };
 
-  $('#btnGoto').onclick = () => { const v = Number($('#gotoId').value); if (v > 0) locateProvince(v); };
-  $('#gotoId').addEventListener('keydown', e => { if (e.key === 'Enter') $('#btnGoto').click(); });
-  $('#btnClearSel').onclick = () => selectProvince(null);
+  if ($('#findGo')) $('#findGo').onclick = doFind;
+  if ($('#findQuery')) $('#findQuery').addEventListener('keydown', e => { if (e.key === 'Enter') doFind(); });
+  $('#btnClearSel').onclick = () => { App.findIds = null; buildESel([]); selectProvince(null); };
   if ($('#btnClearTgt')) $('#btnClearTgt').onclick = () => clearTargets();
   $$('#side [data-leg]').forEach(b => b.onclick = () => showLegend(b.dataset.leg));
 
@@ -1953,13 +2094,6 @@ function initUI() {
   $('#btnCancel2').onclick = () => activeJob.run && activeJob.run.cancel();
   $('#btnOpenOut').onclick = () => fetch('/api/openout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: $('#outDir').value.trim() }) });
 
-  $('#pFilter').oninput = () => renderProvTable();
-  $('#pLandOnly').onchange = () => renderProvTable();
-  $$('#provTable th').forEach(th => th.onclick = () => {
-    const k = th.dataset.k; if (!k) return;
-    provSort = { k, dir: provSort.k === k ? -provSort.dir : 1 };
-    renderProvTable();
-  });
   $$('#anaTable th').forEach(th => th.onclick = () => {
     const k = th.dataset.k; if (!k) return;
     anaSort = { k, dir: anaSort.k === k ? -anaSort.dir : 1 };
@@ -2016,6 +2150,10 @@ function initUI() {
   if ($('#edSupOn')) $('#edSupOn').onclick = () => edExtra('supply', 'add');
   if ($('#edSupOff')) $('#edSupOff').onclick = () => edExtra('supply', 'remove');
   if ($('#edBldAdd')) $('#edBldAdd').onclick = () => edExtra('building', 'add');
+  if ($('#btnCheckIds')) $('#btnCheckIds').onclick = () => { edFillNextIds(); setMsg('已重新核对可用 ID'); };
+  if ($('#depInstall')) $('#depInstall').onclick = depInstall;
+  if ($('#depRecheck')) $('#depRecheck').onclick = () => { depCheck(); setMsg('已重新检测依赖'); };
+  depCheck();
   if ($('#edRef')) $('#edRef').onchange = () => {
     MapView.layerMaps = {}; App.newEnc = {}; App.newEncNext = 20000;
     setMsg('参考切换到 ' + $('#edRef').value + '，正在重建缓存…');
