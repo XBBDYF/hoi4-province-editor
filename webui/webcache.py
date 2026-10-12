@@ -138,20 +138,20 @@ def build(mod: str, out: str, progress=None, disp_max_w: int = 2816, game_dir: s
 
     # 地形底图 (colormap DDS)
     dds = _resolve(mod, game, "map", "terrain", "colormap_rgb_cityemissivemask_a.dds", overlay=ovl)
+    base_done = False
     if os.path.isfile(dds):
-        log("从 colormap DDS 解出地形底图 ...")
-        raw = open(dds, "rb").read()
-        ch = struct.unpack('<I', raw[12:16])[0]
-        cw = struct.unpack('<I', raw[16:20])[0]
-        px = np.frombuffer(raw[128:128 + cw * ch * 4], dtype=np.uint32).reshape(ch, cw)
-        bimg = np.stack([((px >> 16) & 255).astype(np.uint8),
-                         ((px >> 8) & 255).astype(np.uint8),
-                         (px & 255).astype(np.uint8)], -1)
-        del px
-        Image.fromarray(bimg, "RGB").save(os.path.join(out, "base_map.png"))
-        del bimg
-    else:
-        log("未找到 colormap, 用 provinces.bmp 缩放为底图 ...")
+        try:
+            log("从 colormap DDS 解出地形底图 (PIL) ...")
+            with Image.open(dds) as im:
+                b = im.convert("RGB")
+                if b.size != (dw, dh):
+                    b = b.resize((dw, dh), Image.BILINEAR)
+                b.save(os.path.join(out, "base_map.png"))
+            base_done = True
+        except Exception as _e:
+            log("colormap DDS 解码失败(%s), 改用 provinces.bmp 缩放" % _e)
+    if not base_done:
+        log("用 provinces.bmp 缩放为底图 ...")
         src = Image.open(_resolve(mod, game, "map", "provinces.bmp", overlay=ovl)).convert("RGB")
         src = src.resize((dw, dh), Image.BILINEAR)
         src.save(os.path.join(out, "base_map.png"))

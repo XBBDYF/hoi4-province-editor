@@ -44,23 +44,60 @@ const App = {
 /* ------------------------------------------------------------------ */
 /* 通用任务: POST 创建 -> SSE 订阅                                     */
 /* ------------------------------------------------------------------ */
+
+const PROG_TITLE = [
+  ['/api/cache/build', '正在生成/刷新地图缓存…'],
+  ['/api/edit/export', '正在导出并重建缓存…'],
+  ['/api/run', '正在细化地块…'],
+  ['/api/analyze', '正在分析…'],
+  ['/api/audit', '正在完整性检查…'],
+];
+const PROG_STEP = [
+  [/definition/i, 8], [/provinces/i, 18], [/下采样|显示层/i, 30], [/边界/i, 40],
+  [/战略区/i, 50], [/着色层/i, 62], [/面积|prov_index/i, 78], [/中心|连线/i, 88], [/完成|导出完成/i, 100],
+];
+let _progTimer = null;
+function progShow(title) {
+  const el = document.getElementById('bigProg'); if (!el) return;
+  const ti = document.getElementById('bpTitle'); if (ti) ti.textContent = title || '处理中…';
+  const tx = document.getElementById('bpTxt'); if (tx) tx.textContent = '准备中…';
+  const b = document.getElementById('bpBar'); if (b) { b.parentElement.classList.add('indet'); b.style.width = '0%'; }
+  el.classList.add('on');
+}
+function progStep(msg) {
+  const el = document.getElementById('bigProg'); if (!el || !el.classList.contains('on')) return;
+  const tx = document.getElementById('bpTxt'); if (tx) tx.textContent = String(msg || '');
+  let pct = null;
+  for (const [re, v] of PROG_STEP) { if (re.test(String(msg || ''))) pct = v; }
+  const b = document.getElementById('bpBar');
+  if (b && pct != null) { b.parentElement.classList.remove('indet'); b.style.width = pct + '%'; }
+}
+function progHide() {
+  if (_progTimer) { clearTimeout(_progTimer); _progTimer = null; }
+  const el = document.getElementById('bigProg'); if (el) el.classList.remove('on');
+}
+function progTitleFor(url) {
+  for (const [u, ttl] of PROG_TITLE) { if (String(url).indexOf(u) >= 0) return ttl; }
+  return '处理中…';
+}
 function runJob(url, body, { onLog, onDone, onErr } = {}) {
   return fetch(url, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body || {}),
   }).then(r => r.json()).then(({ task, error }) => {
     if (error || !task) { onErr && onErr(error || '任务创建失败'); return null; }
+    _progTimer = setTimeout(() => progShow(progTitleFor(url)), 900);
     const es = new EventSource(`/api/task/${task}/stream`);
     let got = false;
     es.onmessage = (ev) => {
       let d; try { d = JSON.parse(ev.data); } catch { return; }
-      if (d.type === 'log') { onLog && onLog(d.msg); }
+      if (d.type === 'log') { onLog && onLog(d.msg); progStep(d.msg); }
       else if (d.type === 'done') {
-        es.close(); got = true;
+        es.close(); got = true; progHide();
         if (d.error) onErr && onErr(d.error); else onDone && onDone(d.result);
       }
     };
-    es.onerror = () => { es.close(); if (!got) onErr && onErr('连接中断'); };
+    es.onerror = () => { es.close(); progHide(); if (!got) onErr && onErr('连接中断'); };
     return { es, cancel: () => fetch('/api/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task }) }) };
   });
 }

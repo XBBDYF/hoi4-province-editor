@@ -179,3 +179,13 @@ pre.code{background:#0e1116;border:1px solid var(--line);border-radius:6px;paddi
 .cmp-after{position:absolute;top:0;left:0}
 .cmp-line{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);box-shadow:0 0 6px #000;pointer-events:none}
 .cmp-range{position:absolute;left:0;right:0;bottom:6px;width:90%;margin:0 auto;display:block}
+
+#bigProg{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;background:rgba(8,10,14,.55)}
+#bigProg.on{display:flex}
+.bp-box{width:min(560px,82%);background:#1b1f27;border:1px solid var(--line);border-radius:10px;padding:18px 20px;box-shadow:0 14px 44px rgba(0,0,0,.65)}
+.bp-title{font-size:14px;color:#fff;margin-bottom:10px}
+.bp-bar{height:14px;background:#0e1116;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.bp-bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#e0a53c,#f2d27a);transition:width .25s ease}
+.bp-txt{margin-top:8px;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bp-bar.indet i{width:38%;animation:bpindet 1.1s ease-in-out infinite}
+@keyframes bpindet{0%{margin-left:-38%}100%{margin-left:100%}}
