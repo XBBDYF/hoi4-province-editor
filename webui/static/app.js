@@ -73,16 +73,26 @@ function _logAppend(el, m) {
     el.scrollTop = el.scrollHeight;
   });
 }
+let _progBeat = null, _progT0 = 0, _progLast = '准备中…';
 function progShow(title) {
   const el = document.getElementById('bigProg'); if (!el) return;
   const ti = document.getElementById('bpTitle'); if (ti) ti.textContent = title || '处理中…';
   const tx = document.getElementById('bpTxt'); if (tx) tx.textContent = '准备中…';
   const b = document.getElementById('bpBar'); if (b) { b.parentElement.classList.add('indet'); b.style.width = '0%'; }
   el.classList.add('on');
+  _progT0 = Date.now(); _progLast = '准备中…';
+  if (_progBeat) clearInterval(_progBeat);
+  _progBeat = setInterval(() => {            // 每秒显示已等待时间, 避免"没动"的错觉
+    const box = document.getElementById('bigProg');
+    if (!box || !box.classList.contains('on')) return;
+    const t2 = document.getElementById('bpTxt');
+    if (t2) t2.textContent = _progLast + '　（已等待 ' + Math.round((Date.now() - _progT0) / 1000) + 's）';
+  }, 1000);
 }
 function progStep(msg) {
   const el = document.getElementById('bigProg'); if (!el || !el.classList.contains('on')) return;
   const s0 = String(msg || '');
+  _progLast = s0;
   const tx = document.getElementById('bpTxt'); if (tx) tx.textContent = s0;
   const b = document.getElementById('bpBar');
   let pct = null;
@@ -94,6 +104,7 @@ function progStep(msg) {
 }
 function progHide() {
   if (_progTimer) { clearTimeout(_progTimer); _progTimer = null; }
+  if (typeof _progBeat !== 'undefined' && _progBeat) { clearInterval(_progBeat); _progBeat = null; }
   const el = document.getElementById('bigProg'); if (el) el.classList.remove('on');
 }
 function progTitleFor(url) {
@@ -101,25 +112,54 @@ function progTitleFor(url) {
   return '处理中…';
 }
 function runJob(url, body, { onLog, onDone, onErr } = {}) {
+  const _fail = (m) => { progHide(); onErr && onErr(m); };
   return fetch(url, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body || {}),
   }).then(r => r.json()).then(({ task, error }) => {
-    if (error || !task) { onErr && onErr(error || '任务创建失败'); return null; }
+    if (error || !task) { _fail(error || '任务创建失败'); return null; }
     _progTimer = setTimeout(() => progShow(progTitleFor(url)), 900);
     const es = new EventSource(`/api/task/${task}/stream`);
-    let got = false;
+    let got = false, wd = null;
+    const _bump = () => {
+      if (wd) clearTimeout(wd);
+      wd = setTimeout(() => {
+        progStep('已超过 30s 没有收到服务端消息：任务可能已停止。可点“取消”，或关掉后重新双击 ★一键启动Web编辑器.bat');
+      }, 30000);
+    };
+    _bump();
     es.onmessage = (ev) => {
+      _bump();
       let d; try { d = JSON.parse(ev.data); } catch { return; }
       if (d.type === 'log') { onLog && onLog(d.msg); progStep(d.msg); }
+      else if (d.type === 'ping') { /* 心跳: 只刷新看门狗 */ }
       else if (d.type === 'done') {
+        if (wd) { clearTimeout(wd); wd = null; }
         es.close(); got = true; progHide();
         if (d.error) onErr && onErr(d.error); else onDone && onDone(d.result);
       }
     };
-    es.onerror = () => { es.close(); progHide(); if (!got) onErr && onErr('连接中断'); };
+    es.onerror = () => {
+      if (wd) { clearTimeout(wd); wd = null; }
+      es.close();
+      if (!got) _fail('与服务端的连接中断（服务可能已停止）。请确认服务在运行：双击 ★一键启动Web编辑器.bat');
+    };
     return { es, cancel: () => fetch('/api/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task }) }) };
+  }).catch(e => {
+    _fail('无法连接到服务（' + ((e && e.message) || e) + '）。\n请确认服务正在运行：双击项目根目录的 ★一键启动Web编辑器.bat');
+    return null;
   });
+}
+async function serverAlive() {
+  try {
+    const r = await fetch('/api/state?t=' + Date.now(), { cache: 'no-store' });
+    return !!r.ok;
+  } catch (e) { return false; }
+}
+async function needServer() {
+  if (await serverAlive()) return true;
+  alert('服务没有响应：Web 服务可能未启动或已停止。\n请双击项目根目录的 ★一键启动Web编辑器.bat 重新启动后再试。');
+  return false;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1878,6 +1918,7 @@ function setBusy(which, busy) {
 let activeJob = { analyze: null, run: null };
 
 async function doAnalyze() {
+  if (!(await needServer())) return;
   collectCfg();
   setBusy('analyze', true);
   $('#anaSummary').textContent = '运行中…';
@@ -1895,6 +1936,7 @@ async function doAnalyze() {
 }
 
 async function doRun() {
+  if (!(await needServer())) return;
   const cfg = collectCfg();
   if (!confirm('将开始细化并写出文件到输出目录：\n' + cfg.out_dir + '\n\n继续吗？')) return;
   setBusy('run', true);
@@ -1945,6 +1987,7 @@ function renderRunResult(res) {
 }
 
 async function doAudit() {
+  if (!(await needServer())) return;
   collectCfg();
   $('#audSpinner').style.display = 'inline-flex';
   $('#auditBody').innerHTML = '检查中…';
@@ -1959,6 +2002,7 @@ async function doAudit() {
 }
 
 async function doRepair() {
+  if (!(await needServer())) return;
   const cfg = collectCfg();
   if (!confirm('将按当前参数【只修复、不拆分】，把修正写到输出目录：\n' + cfg.out_dir + '\n\n继续吗？')) return;
   $('#btnRepair').disabled = true; $('#btnAudit').disabled = true;

@@ -279,11 +279,20 @@ class ColorIndex:
     def __init__(self, packed: np.ndarray):
         self.h, self.w = packed.shape
         flat = packed.ravel()
-        self.uniq, self.counts = np.unique(flat, return_counts=True)
-        order = np.argsort(flat, kind="stable")
-        self.order = order.astype(np.int64)
-        self.bounds = np.zeros(len(self.uniq) + 1, dtype=np.int64)
-        np.cumsum(self.counts, out=self.bounds[1:])
+        # 只做一次全量排序: 从排序结果直接推出 uniq / counts / bounds
+        # (原先 np.unique 内部排一次 + np.argsort 再排一次, 11.5M 像素下白排一遍)
+        self.order = np.argsort(flat, kind="stable")
+        sflat = flat[self.order]
+        if sflat.size:
+            chg = np.empty(sflat.shape, dtype=bool)
+            chg[0] = True
+            np.not_equal(sflat[1:], sflat[:-1], out=chg[1:])
+            starts = np.flatnonzero(chg)
+        else:
+            starts = np.zeros(0, dtype=np.int64)
+        self.uniq = sflat[starts] if sflat.size else sflat
+        self.bounds = np.append(starts, flat.size).astype(np.int64)
+        self.counts = np.diff(self.bounds)
         self.area = {int(v): int(c) for v, c in zip(self.uniq, self.counts)}
 
     def indices(self, key: int) -> np.ndarray:
@@ -431,8 +440,12 @@ def _kmeans(coords: np.ndarray, k: int, rng: np.random.Generator, iters: int = 4
             centers[c] = coords[rng.choice(n, p=p)]
         d2 = np.minimum(d2, ((coords - centers[c]) ** 2).sum(1))
     labels = np.full(n, -1, dtype=np.int32)
+    # 距离用 ||x||^2 + ||c||^2 - 2 x·c 展开: 走 BLAS 矩阵乘, 比 (n,k,2) 广播快数倍且省内存
+    xn = (coords ** 2).sum(1)
     for _ in range(iters):
-        dist = ((coords[:, None, :] - centers[None, :, :]) ** 2).sum(-1)
+        cn = (centers ** 2).sum(1)
+        dist = xn[:, None] + cn[None, :] - 2.0 * (coords @ centers.T)
+        np.maximum(dist, 0, out=dist)
         new = dist.argmin(1).astype(np.int32)
         if np.array_equal(new, labels):
             break
@@ -563,17 +576,19 @@ def split_region(ys: np.ndarray, xs: np.ndarray, k: int, rng, min_part: int,
 
     def one_attempt():
         _lab, centers = _kmeans(coords, k, rng, iters=35)
-        used, seeds, slab = set(), [], []
+        seeds, slab = [], []
+        taken = np.zeros(coords.shape[0], dtype=bool)
         for c in range(k):
             d = ((coords - centers[c]) ** 2).sum(1)
-            # 先尝试最近点，重复时向后找；np.argsort 保证确定性。
-            for idx in np.argsort(d):
-                idx = int(idx)
-                if idx not in used:
-                    used.add(idx)
-                    seeds.append((int(ys[idx]) - y0, int(xs[idx]) - x0))
-                    slab.append(c)
-                    break
+            # 取"还没被占用的最近点"：等价于对 d 升序后取第一个未用点, 但只需一次 argmin
+            if taken.any():
+                d = np.where(taken, np.inf, d)
+            idx = int(np.argmin(d))
+            if not np.isfinite(d[idx]) or taken[idx]:
+                break
+            taken[idx] = True
+            seeds.append((int(ys[idx]) - y0, int(xs[idx]) - x0))
+            slab.append(c)
         if len(seeds) < 2:
             return None
         grid = _multi_source_bfs(mask, seeds, slab)
@@ -1471,6 +1486,7 @@ def run(cfg: Config, progress: Optional[Callable[[str], None]] = None,
         colors = make_colors(need, used_colors, rng)
         if len(colors) < need:
             continue
+        _log(progress, "开始逐个细化 %d 个地块(每 5 个刷新一次进度) ..." % total)
         for j, lab in enumerate(order[1:]):
             rc, gc, bc, key = colors[j]
             new_id = next_id
@@ -1506,7 +1522,7 @@ def run(cfg: Config, progress: Optional[Callable[[str], None]] = None,
             prov_id=pid, area=row["area"], parts=len(order),
             new_ids=created_ids, state=row["state"], sr=row["sr"],
         ))
-        if i % 25 == 0 or i == total:
+        if i % 5 == 0 or i == total:
             _log(progress, "细化进度 %d/%d ..." % (i, total))
 
     # ===== 陆地邻接面积均衡(有无密度图都尝试) =====

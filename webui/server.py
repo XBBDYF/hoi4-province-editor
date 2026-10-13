@@ -471,6 +471,20 @@ def api_audit():
 # --------------------------------------------------------------------------- #
 # task query / SSE / cancel
 # --------------------------------------------------------------------------- #
+@app.route("/api/tasks")
+def api_tasks():
+    out = []
+    with TASK_LOCK:
+        for tid, t in TASKS.items():
+            out.append({"id": tid, "kind": t.get("kind"), "done": bool(t.get("done")),
+                        "error": (t.get("error") or "")[:400],
+                        "elapsed": round(time.time() - t.get("started", time.time()), 1),
+                        "lines": len(t.get("log") or []),
+                        "last": (t.get("log") or [""])[-1]})
+    out.sort(key=lambda x: (x["done"], -x["elapsed"]))
+    return jsonify({"ok": True, "count": len(out), "running": len([x for x in out if not x["done"]]), "tasks": out})
+
+
 @app.route("/api/task/<tid>")
 def api_task(tid):
     with TASK_LOCK:
@@ -487,6 +501,7 @@ def api_task(tid):
 def api_task_stream(tid):
     def gen():
         idx = 0
+        tick = 0
         while True:
             with TASK_LOCK:
                 t = TASKS.get(tid)
@@ -504,6 +519,9 @@ def api_task_stream(tid):
                 yield "data: %s\n\n" % json.dumps(
                     {"type": "done", "result": result, "error": error})
                 return
+            tick += 1
+            if tick % 20 == 0:      # 每 ~5s 一个心跳, 让前端知道服务还活着
+                yield "data: %s\n\n" % json.dumps({"type": "ping"})
             time.sleep(0.25)
 
     return Response(gen(), mimetype="text/event-stream",
