@@ -51,6 +51,17 @@ def _default_gradient():
 
 app = Flask(__name__, static_folder=os.path.join(HERE, "static"), static_url_path="/static")
 
+
+@app.after_request
+def _no_store_static(resp):
+    try:
+        if request.path.startswith("/static/"):
+            resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            resp.headers["Pragma"] = "no-cache"
+    except Exception:
+        pass
+    return resp
+
 # --------------------------------------------------------------------------- #
 # task manager (analyze / run / cache / audit run in background threads)
 # --------------------------------------------------------------------------- #

@@ -23,40 +23,6 @@ import re
 
 import numpy as np
 
-
-def _trace_polyline(pts, maxpts=32, maxsteps=8000):
-    """把无序边界像素点集串成一条折线(贪心沿邻域走), 并等距下采样。"""
-    st = set(pts)
-    if not st:
-        return []
-    if len(st) == 1:
-        p = next(iter(st)); return [[int(p[0]), int(p[1])]]
-    order = []
-    cur = min(st, key=lambda q: (q[1], q[0]))
-    remain = set(st); remain.discard(cur); order.append(cur)
-    ring = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1) if dx or dy]
-    ring2 = [(dx, dy) for dx in (-2, -1, 0, 1, 2) for dy in (-2, -1, 0, 1, 2) if dx or dy]
-    steps = 0
-    while remain and steps < maxsteps:
-        steps += 1
-        cx, cy = cur
-        nxt = None
-        for dx, dy in ring:
-            q = (cx + dx, cy + dy)
-            if q in remain:
-                nxt = q; break
-        if nxt is None:
-            for dx, dy in ring2:
-                q = (cx + dx, cy + dy)
-                if q in remain:
-                    nxt = q; break
-        if nxt is None:
-            nxt = next(iter(remain))
-        remain.discard(nxt); order.append(nxt); cur = nxt
-    if len(order) > maxpts:
-        step = (len(order) - 1) / float(maxpts - 1)
-        order = [order[int(round(i * step))] for i in range(maxpts)]
-    return [[int(q[0]), int(q[1])] for q in order]
 from PIL import Image
 
 from province_splitter.core import (read_definition, load_provinces_bmp, save_provinces_bmp,
@@ -71,6 +37,66 @@ STANDARD_TERRAINS = [
     "desert", "marsh", "jungle", "swamp", "ocean", "lakes", "deep_ocean",
     "shallow_sea", "water_fjords", "water_shallow_sea", "water_deep_ocean", "unknown",
 ]
+
+
+def _pk(a, b):
+    a = int(a); b = int(b)
+    return (a, b) if a <= b else (b, a)
+
+
+def _centroid(pts):
+    n = len(pts)
+    if not n:
+        return None
+    return [int(round(sum(p[0] for p in pts) / float(n))), int(round(sum(p[1] for p in pts) / float(n)))]
+
+
+def _chain_segments(pts, min_len=3, maxseg=16):
+    """把公共边界像素点集串成若干段折线; 遇到断口就断开(保证不会画出横跨地图的乱线)。"""
+    st = set((int(p[0]), int(p[1])) for p in pts)
+    if len(st) < 2:
+        return []
+    remain = set(st)
+    segs = []
+    ring4 = ((1, 0), (-1, 0), (0, 1), (0, -1))
+    ring8 = ring4 + ((1, 1), (1, -1), (-1, 1), (-1, -1))
+    while remain:
+        cur = min(remain, key=lambda q: (q[1], q[0]))
+        remain.discard(cur)
+        line = [cur]
+        while remain:
+            nxt = None
+            for dx, dy in ring4:            # 先走正交邻域(贴边)
+                q = (cur[0] + dx, cur[1] + dy)
+                if q in remain:
+                    nxt = q
+                    break
+            if nxt is None:
+                for dx, dy in ring8:        # 再走对角(拐角)
+                    q = (cur[0] + dx, cur[1] + dy)
+                    if q in remain:
+                        nxt = q
+                        break
+            if nxt is None:                 # 允许跨 2px 细缝, 但不做大跳变
+                for dx in range(-2, 3):
+                    for dy in range(-2, 3):
+                        q = (cur[0] + dx, cur[1] + dy)
+                        if q in remain:
+                            nxt = q
+                            break
+                    if nxt:
+                        break
+            if nxt is None:
+                break
+            remain.discard(nxt)
+            line.append(nxt)
+            cur = nxt
+        if len(line) >= min_len:
+            if len(line) > maxseg:
+                step = (len(line) - 1) / float(maxseg - 1)
+                line = [line[int(round(k * step))] for k in range(maxseg)]
+            segs.append([[int(q[0]), int(q[1])] for q in line])
+    return segs
 
 def _rresolve(mod, game, ref, *parts):
     rel = os.path.join(*parts)
@@ -720,44 +746,45 @@ class Editor:
         self._apply(op)
         return op
 
-    def _border_polylines(self, pairs, maxpts=32):
-        """为每对省 (f,t) 生成沿两省公共边界的折线(province.bmp 像素坐标), 返回 {(lo,hi): [[x,y],...]}。"""
+    def _pair_points(self, pairs):
+        """返回 {pair: [(x,y),...]} —— 每一对省的公共边界像素(pair=(lo,hi))。"""
         import numpy as _np
         want = {}
         ids = set()
-        for (f, t) in pairs:
-            f = int(f); t = int(t)
-            if f == t or f <= 0 or t <= 0:
+        for pr in pairs:
+            lo, hi = int(pr[0]), int(pr[1])
+            if lo <= 0 or hi <= 0 or lo == hi:
                 continue
-            lo, hi = (f, t) if f < t else (t, f)
-            want[lo * 1000000 + hi] = (lo, hi)
-            ids.add(lo); ids.add(hi)
+            if lo > hi:
+                lo, hi = hi, lo
+            want[(lo, hi)] = True
+            ids.add(lo)
+            ids.add(hi)
         if not want:
             return {}
         pid = self.pid
         idarr = _np.fromiter(ids, dtype=_np.int64, count=len(ids))
-        wkeys = _np.fromiter(want.keys(), dtype=_np.int64, count=len(want))
         acc = {}
         for (A, B, dx, dy) in ((pid[:, :-1], pid[:, 1:], 1, 0), (pid[:-1, :], pid[1:, :], 0, 1)):
-            A2 = A.astype(_np.int64); B2 = B.astype(_np.int64)
+            A2 = A.astype(_np.int64)
+            B2 = B.astype(_np.int64)
             m = (A > 0) & (B > 0) & (A != B)
             if not m.any():
                 continue
             m = m & (_np.isin(A2, idarr) & _np.isin(B2, idarr))
             if not m.any():
                 continue
-            lo = _np.minimum(A2, B2)[m]; hi = _np.maximum(A2, B2)[m]
-            keys = lo * 1000000 + hi
             ys, xs = _np.nonzero(m)
-            keep = _np.isin(keys, wkeys, assume_unique=False)
-            for k, x0, y0 in zip(keys[keep].tolist(), xs[keep].tolist(), ys[keep].tolist()):
-                lst = acc.setdefault(k, [])
-                lst.append((x0, y0))
-                lst.append((x0 + dx, y0 + dy))
-        out = {}
-        for k, pts in acc.items():
-            out[want[k]] = _trace_polyline(pts, maxpts)
-        return out
+            for x0, y0, a0, b0 in zip(xs.tolist(), ys.tolist(), A2[m].tolist(), B2[m].tolist()):
+                key = (a0, b0) if a0 < b0 else (b0, a0)
+                if key not in want:
+                    continue
+                # 只保留 1px 细边: 取较小 ID 那一侧的像素, 这样串联出来就是"一条边界线"
+                if a0 < b0:
+                    acc.setdefault(key, []).append((x0, y0))
+                else:
+                    acc.setdefault(key, []).append((x0 + dx, y0 + dy))
+        return acc
 
     def _land_adj(self):
         try:
@@ -811,17 +838,29 @@ class Editor:
                     elif typ in ("sea", "canal", "strait"):  # 跨海连接(海峡/运河) => 可穿越
                         kind = "canal" if "canal" in rule else "strait"
                         adj[f].add(t2_); adj[t2_].add(f)
-                        edges.append({"type": kind, "a": f, "b": t2_})
+                        _th = c[3].strip()
+                        edges.append({"type": kind, "a": f, "b": t2_,
+                                      "th": int(_th) if _th.lstrip("-").isdigit() else 0})
         for (ba, bb) in blocked:                        # impassable: 从像素邻接中剔除
             adj[ba].discard(bb); adj[bb].discard(ba)
         try:
-            _prs = [(e["a"], e["b"]) for e in edges if e.get("type") == "impassable"]
-            _bp = self._border_polylines(_prs) if _prs else {}
+            _prs = set()
             for e in edges:
                 if e.get("type") == "impassable":
-                    a0, b0 = int(e["a"]), int(e["b"])
-                    lo, hi = (a0, b0) if a0 < b0 else (b0, a0)
-                    e["path"] = _bp.get((lo, hi), [])
+                    _prs.add(_pk(e["a"], e["b"]))
+                elif e.get("th"):
+                    _prs.add(_pk(e["a"], e["th"]))
+                    _prs.add(_pk(e["b"], e["th"]))
+            _pt = self._pair_points(_prs) if _prs else {}
+            for e in edges:
+                if e.get("type") == "impassable":
+                    e["segments"] = _chain_segments(_pt.get(_pk(e["a"], e["b"]), []))
+                elif e.get("th"):
+                    # 海峡/运河: 两端各自与水路的接触点质心 -> 真实跨越位置
+                    pa = _centroid(_pt.get(_pk(e["a"], e["th"]), []))
+                    pb = _centroid(_pt.get(_pk(e["b"], e["th"]), []))
+                    if pa and pb:
+                        e["path"] = [pa, pb]
         except Exception:
             pass
         self._ladj = adj

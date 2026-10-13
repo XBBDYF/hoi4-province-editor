@@ -315,7 +315,7 @@ function buildLayerControls() {
       <input type="range" min="0" max="100" value="${Math.round(L.op * 100)}">
       <span class="pct">${Math.round(L.op * 100)}</span>`;
     const [cb, rng] = [row.querySelector('input[type=checkbox]'), row.querySelector('input[type=range]')];
-    cb.onchange = () => { L.vis = cb.checked; requestDraw(); };
+    cb.onchange = () => { L.vis = cb.checked; if (L.img === 'links' && cb.checked && !App.railData && typeof edLoadRailData === 'function') edLoadRailData(); requestDraw(); };
     row.querySelector('label').onclick = () => { cb.checked = !cb.checked; cb.onchange(); };
     rng.oninput = () => { L.op = Number(rng.value) / 100; row.querySelector('.pct').textContent = rng.value; requestDraw(); };
     box.appendChild(row);
@@ -344,7 +344,7 @@ function draw() {
   if (!MapView.inited) return;
   const dw = MapView.W * s, dh = MapView.H * s;
   ctx.imageSmoothingEnabled = false;          // 放大后为锐利像素
-  if (App.editMode) {
+  if (App.editMode && edTabActive()) {          // 只有停在编辑页才用编辑图层样式
     const layer = App.editLayer;
     const provImg = MapView.imgs.prov;
     if (provImg) { ctx.globalAlpha = 1; ctx.drawImage(provImg, x, y, dw, dh); }   // 底层=地块色(海洋也显地块)
@@ -379,7 +379,13 @@ function draw() {
     ctx.globalAlpha = 1;
   }
   const linkL = MapView.layers.find(l => l.img === 'links');
-  if (linkL && linkL.vis && App.links && App.centers) drawLinks(ctx, linkL.op);
+  if (linkL && linkL.vis) {
+    if (App.railData) _drawAdjEdges(ctx);                    // 真实几何(沿边界/真实跨越)
+    else {
+      if (typeof edLoadRailData === 'function') edLoadRailData();
+      if (App.links && App.centers) drawLinks(ctx, linkL.op); // 回退: 旧的中心连线
+    }
+  }
   const railL = MapView.layers.find(l => l.img === 'rail');
   if (railL && railL.vis && App.railData) { drawRails(ctx); }
   const borderL = MapView.layers.find(l => l.img === 'edges');
@@ -394,6 +400,7 @@ function drawLinks(ctx, alpha) {
   ctx.globalAlpha = alpha;
   ctx.lineWidth = 1.6;
   for (const lk of App.links) {
+    if (lk.type === 'impassable') continue;   // 不可通行必须画边界, 不能用中心连线
     const cf = C[lk.f], ct = C[lk.t];
     if (!cf || !ct) continue;
     const cth = (lk.th > 0 && C[lk.th]) ? C[lk.th] : null;
@@ -915,6 +922,24 @@ async function editRefresh() {
     else setMsg('编辑状态读取失败: ' + r.error);
   } catch (e) { setMsg('编辑状态读取失败: ' + e.message); }
 }
+async function edEnterRefresh() {
+  // 进入编辑页时: 以界面下拉为准同步图层, 再重载图层样式并重放已记录的操作
+  const sel = $('#edLayer');
+  const want = (sel && sel.value) ? sel.value : App.editLayer;
+  if (want && want !== App.editLayer) {
+    App.editLayer = want;
+    App.editTarget = null; MapView.tgtHL = null;
+    MapView.layerMaps = {};                      // 强制重载对应图层数据
+    if (typeof edUpdateTargetUI === 'function') edUpdateTargetUI();
+  }
+  edSyncPanels();
+  try { await edLoadLayerMaps(); } catch (e) { }
+  await editRefresh();
+  edSyncPanels();
+  if (App.editLayer === 'rail') { try { await edLoadRailData(); } catch (e) { } }
+  if (App.editLayer === 'terrain') { try { await edLoadTerrainData(); } catch (e) { } }
+  requestDraw();
+}
 async function doEditMerge() {
   if (App.editSel.length < 2) { setMsg('请先选 ≥2 个省份（第一个为目标，Shift 加选）'); return; }
   const into = App.editSel[0], ids = App.editSel.slice(1);
@@ -1392,7 +1417,17 @@ async function edLoadRailData() {
     if (!r.ok) { setMsg('读取铁路失败: ' + r.error); return; }
     App.railData = r.data || { rails: [], supplies: [], edges: [], land: [] };
     App.railLand = new Set(((App.railData.land) || []).map(Number));
-    if ($('#railStat')) $('#railStat').textContent = App.railData.rails.length + ' 条铁路 · ' + App.railData.supplies.length + ' 个补给站';
+    if ($('#railStat')) {
+      const es = App.railData.edges || [];
+      const c = (t) => es.filter(e => e.type === t).length;
+      const shown = (t) => (App.adjShow && App.adjShow[t]) ? c(t) : 0;
+      const geo = (t) => es.filter(e => e.type === t && ((e.segments && e.segments.length) || (e.path && e.path.length))).length;
+      $('#railStat').innerHTML = App.railData.rails.length + ' 条铁路 · ' + App.railData.supplies.length + ' 个补给站<br>' +
+        '相邻叠加：海峡 ' + c('strait') + '/几何' + geo('strait') + ' · 运河 ' + c('canal') + '/几何' + geo('canal') +
+        ' · 不可通行 ' + c('impassable') + '/几何' + geo('impassable') +
+        '　显示中：海' + shown('strait') + '/运' + shown('canal') + '/不可' + shown('impassable');
+      if (c('impassable') && !shown('impassable')) $('#railStat').innerHTML += '<br><b style="color:#ffd23f">不可通行当前被隐藏：请勾选下面的"不可通行屏障"</b>';
+    }
     requestDraw();
   } catch (e) { setMsg('读取铁路失败: ' + e.message); }
 }
@@ -1402,36 +1437,39 @@ function _lvColor(l) {
 function _drawAdjEdges(ctx) {
   const E = (App.railData && App.railData.edges) || [];
   if (!E.length) return;
-  const C = App.centers;
+  if (!App.adjShow) App.adjShow = { strait: false, canal: true, impassable: true };
   const { s, x, y } = MapView.cam;
-  const st = { strait: ['#33d6ff', [7, 5]], canal: ['#ffd23f', [3, 4]], impassable: ['#ff4d4d', [2, 7]] };
-  ctx.save(); ctx.lineWidth = 1.8; ctx.lineCap = 'round';
+  // 后端给的是地图原始像素坐标(如 5632x2048), 前端按显示分辨率(如 2816x1024)绘制 -> 需按比例换算
+  const k = (App.meta && App.meta.width) ? (MapView.W / App.meta.width) : 1;
+  const T = (p) => [x + p[0] * k * s, y + p[1] * k * s];
+  ctx.save(); ctx.lineCap = 'round';
   for (const e of E) {
-    const stl = st[e.type] || ['#9aa0a6', [3, 3]];
-    const P = e.path;
-    if (e.type === 'impassable' && P && P.length > 1) {
-      // 不可通行: 沿两省公共边界的屏障折线(细化后会按新省界重算并重画)
-      ctx.setLineDash([]); ctx.strokeStyle = '#ff3b3b'; ctx.lineWidth = 2.6;
-      ctx.beginPath();
-      ctx.moveTo(x + P[0][0] * s, y + P[0][1] * s);
-      for (let k = 1; k < P.length; k++) ctx.lineTo(x + P[k][0] * s, y + P[k][1] * s);
+    if (!App.adjShow[e.type]) continue;
+    if (e.type === 'impassable') {
+      // 只画真实的公共边界分段(没有几何就不画, 绝不乱连)
+      for (const seg of (e.segments || [])) {
+        if (!seg || seg.length < 2) continue;
+        ctx.setLineDash([]); ctx.strokeStyle = '#ff3b3b'; ctx.lineWidth = 3;
+        const P = seg.map(T);
+        ctx.beginPath(); ctx.moveTo(P[0][0], P[0][1]);
+        for (let k = 1; k < P.length; k++) ctx.lineTo(P[k][0], P[k][1]);
+        ctx.stroke();
+      }
+    } else if (e.path && e.path.length >= 2) {
+      // 海峡/运河: 真实跨越位置的短连线
+      const st = e.type === 'canal' ? ['#ffd23f', [3, 4]] : ['#33d6ff', [7, 5]];
+      ctx.setLineDash(st[1]); ctx.strokeStyle = st[0]; ctx.lineWidth = 1.8;
+      const P = e.path.map(T);
+      ctx.beginPath(); ctx.moveTo(P[0][0], P[0][1]);
+      for (let k = 1; k < P.length; k++) ctx.lineTo(P[k][0], P[k][1]);
       ctx.stroke();
-      ctx.lineWidth = 1.8;
-      continue;
     }
-    const a = C[String(e.a)], b = C[String(e.b)];
-    if (!a || !b) continue;
-    ctx.setLineDash(stl[1]); ctx.strokeStyle = stl[0];
-    ctx.beginPath();
-    ctx.moveTo(x + a[0] * s, y + a[1] * s);
-    ctx.lineTo(x + b[0] * s, y + b[1] * s);
-    ctx.stroke();
   }
   ctx.restore();
 }
 function drawRails(ctx) {
+  _drawAdjEdges(ctx);                     // 相邻/不可通行 叠加不依赖 centers, 先画
   if (!App.railData || !App.centers) return;
-  _drawAdjEdges(ctx);
   const { s, x, y } = MapView.cam, C = App.centers;
   const area = $('#maparea');
   const pad = 60 / s;
@@ -1571,7 +1609,28 @@ async function edExtra(kind, op) {
     if (r.ok) { showEditOps(r.status); setMsg('已加建筑 ' + key + ' @#' + pid); } else setMsg('失败: ' + r.error);
   }
 }
+function edApplyMode() {
+  // 编辑页: 隐藏左上角图层面板, 用编辑图层样式; 其他页: 显示图层面板, 用普通图层样式
+  const on = edTabActive();
+  const lp = $('#layers');
+  if (lp) lp.style.display = on ? 'none' : '';
+  const em = $('#editMode');
+  if (on) {
+    if (em && !em.checked) em.checked = true;
+    App.editMode = true;
+  } else {
+    if (em && em.checked) em.checked = false;
+    App.editMode = false;
+    MapView.esel = null; MapView.tgtHL = null;    // 清掉编辑专用的高亮
+  }
+  requestDraw();
+}
+function edTabActive() {
+  const p = $('.pane[data-pane="edit"]');
+  return !!(p && p.classList.contains('active'));
+}
 function edSyncPanels() {
+  if (!edTabActive()) return;          // 只有在"编辑"页才刷新面板 / 加载图层数据
   const L = App.editLayer;
   if ($('#fsState')) $('#fsState').style.display = (L === 'state') ? '' : 'none';
   if ($('#fsSr')) $('#fsSr').style.display = (L === 'sr') ? '' : 'none';
@@ -1726,8 +1785,9 @@ function initTabs() {
         pane.appendChild(App.cfgTpl);
       }
       const _em = $('#editMode');
-      if (tab === 'edit') { if (_em && !App.editMode) { _em.checked = true; _em.onchange(); } editRefresh(); }
+      if (tab === 'edit') { if (_em && !App.editMode) { _em.checked = true; _em.onchange(); } edEnterRefresh(); }
       else if (_em && App.editMode) { _em.checked = false; _em.onchange(); }
+      edApplyMode();
       setTimeout(resizeCanvas, 30);
     };
   });
@@ -2046,7 +2106,12 @@ async function boot(reload) {
     App.newEnc = {}; App.newEncNext = 20000; App.ovState = {}; App.ovSr = {}; App.ovCont = {}; App.mergedOut = {};
   }
   loadInputs();
-  if (typeof edLoadRailData === 'function') edLoadRailData();
+  if ($('#edLayer') && $('#edLayer').value) App.editLayer = $('#edLayer').value;   // 下拉为准(无 IO)
+  if (edTabActive()) {                       // 只有停在"编辑"页时才做检查/加载
+    if ($('#editMode')) App.editMode = !!$('#editMode').checked;
+    if (typeof edSyncPanels === 'function') edSyncPanels();
+    if (typeof edLoadRailData === 'function') edLoadRailData();
+  }
   document.addEventListener('change', saveInputs);
   document.addEventListener('input', saveInputs);
   edSyncPanels();
@@ -2065,6 +2130,7 @@ async function boot(reload) {
     if (App.editLayer === 'terrain') await edLoadTerrainData();
     if (App.editLayer === 'rail') await edLoadRailData();
   }
+  edApplyMode();
   setMsg('就绪');
 }
 
@@ -2151,6 +2217,19 @@ function initUI() {
   if ($('#edSupOff')) $('#edSupOff').onclick = () => edExtra('supply', 'remove');
   if ($('#edBldAdd')) $('#edBldAdd').onclick = () => edExtra('building', 'add');
   if ($('#btnCheckIds')) $('#btnCheckIds').onclick = () => { edFillNextIds(); setMsg('已重新核对可用 ID'); };
+  // 海峡/运河/不可通行 显示开关(记忆)
+  const _adjMap = { adjStrait: 'strait', adjCanal: 'canal', adjImpass: 'impassable' };
+  try { const sv = JSON.parse(localStorage.getItem('hoi4-adjshow') || 'null'); if (sv) App.adjShow = sv; } catch (e) { }
+  App.adjShow = Object.assign({ strait: false, canal: true, impassable: true }, App.adjShow || {});
+  for (const id in _adjMap) {
+    const el = $('#' + id); if (!el) continue;
+    el.checked = !!App.adjShow[_adjMap[id]];
+    el.onchange = () => {
+      App.adjShow[_adjMap[id]] = el.checked;
+      try { localStorage.setItem('hoi4-adjshow', JSON.stringify(App.adjShow)); } catch (e) { }
+      requestDraw();
+    };
+  }
   if ($('#depInstall')) $('#depInstall').onclick = depInstall;
   if ($('#depRecheck')) $('#depRecheck').onclick = () => { depCheck(); setMsg('已重新检测依赖'); };
   depCheck();
