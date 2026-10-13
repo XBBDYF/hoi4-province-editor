@@ -803,14 +803,26 @@ def balance_land_shapes(pid_map: np.ndarray, land_ids: set, gradient: Optional[n
                 valid &= np.abs(donor_grad - receiver_grad) <= gradient_gap
             if protected is not None and donor_protected is not None:
                 valid &= ~donor_protected
-            yy, xx = np.nonzero(valid)
-            for ly, lx in zip(yy.tolist(), xx.tolist()):
-                donor = int(donor_view[ly, lx])
-                receiver = int(receiver_view[ly, lx])
-                gy = row0 + ly * row_step
-                gx = col0 + lx * col_step
-                pos = gy * w + gx
-                pairs[(donor, receiver)].append(pos)
+            nz = np.flatnonzero(valid.ravel())
+            if nz.size == 0:
+                return
+            vw = donor_view.shape[1]
+            dv = donor_view.ravel()[nz].astype(np.int64)
+            rv = receiver_view.ravel()[nz].astype(np.int64)
+            rows_ = nz // vw
+            cols_ = nz % vw
+            pos = (row0 + rows_ * row_step) * w + (col0 + cols_ * col_step)
+            key = dv * (max_id + 1) + rv
+            o = np.argsort(key, kind="stable")            # 组内保持行优先顺序
+            ks = key[o]
+            ps = pos[o]
+            starts = np.flatnonzero(np.concatenate(([True], ks[1:] != ks[:-1])))
+            ends = np.concatenate((starts[1:], [ks.size]))
+            gfirst = o[starts]                            # 每组首个像素的原始下标
+            for gi in np.argsort(gfirst, kind="stable"):  # 按首次出现顺序插入, 与原实现一致
+                b0 = int(starts[gi]); b1 = int(ends[gi])
+                k0 = int(ks[b0])
+                pairs[(k0 // (max_id + 1), k0 % (max_id + 1))].extend(ps[b0:b1].tolist())
 
         # 分块构建边界候选，控制大地图上的临时内存。
         chunk = 256
@@ -1421,6 +1433,7 @@ def run(cfg: Config, progress: Optional[Callable[[str], None]] = None,
     children = {}          # 父地块ID -> [新地块ID...]
 
     total = len(rows)
+    _log(progress, "开始逐个细化 %d 个地块(每 5 个刷新一次进度) ..." % total)
     for i, row in enumerate(rows, 1):
         if cancel and cancel():
             _log(progress, "已取消")
@@ -1486,7 +1499,6 @@ def run(cfg: Config, progress: Optional[Callable[[str], None]] = None,
         colors = make_colors(need, used_colors, rng)
         if len(colors) < need:
             continue
-        _log(progress, "开始逐个细化 %d 个地块(每 5 个刷新一次进度) ..." % total)
         for j, lab in enumerate(order[1:]):
             rc, gc, bc, key = colors[j]
             new_id = next_id

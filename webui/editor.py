@@ -746,6 +746,56 @@ class Editor:
         self._apply(op)
         return op
 
+    def _coast_points(self, ids, cap=400):
+        """一次扫描取出若干地块与"任意其它地块"相接的边界像素(用于海峡的最近点对兜底)。"""
+        import numpy as _np
+        ids = [int(i) for i in set(ids) if int(i) > 0]
+        if not ids:
+            return {}
+        pid = self.pid
+        mx = int(pid.max())
+        lut = _np.zeros(mx + 2, dtype=bool)
+        for i in ids:
+            if i <= mx:
+                lut[i] = True
+        if not lut.any():
+            return {}
+        acc = {}
+        for (dx, dy) in ((1, 0), (0, 1)):
+            if dx:
+                Aa = pid[:, :-1]; Bb = pid[:, 1:]
+            else:
+                Aa = pid[:-1, :]; Bb = pid[1:, :]
+            diff = (Aa != Bb)
+            for (side, is_a) in ((Aa, True), (Bb, False)):
+                m = diff & lut[_np.clip(side, 0, mx + 1)]
+                if not m.any():
+                    continue
+                ys, xs = _np.nonzero(m)
+                vals = side[m].tolist()
+                if is_a:
+                    for x0, y0, v in zip(xs.tolist(), ys.tolist(), vals):
+                        acc.setdefault(int(v), []).append((x0, y0))
+                else:
+                    for x0, y0, v in zip(xs.tolist(), ys.tolist(), vals):
+                        acc.setdefault(int(v), []).append((x0 + dx, y0 + dy))
+        out = {}
+        for k, pts in acc.items():
+            uniq = list(dict.fromkeys(pts))          # 去重, 保持顺序
+            if len(uniq) > cap:
+                # 按 8x8 格子抽稀, 保持空间分布
+                seen = set(); keep = []
+                for (x0, y0) in uniq:
+                    key = (x0 >> 3, y0 >> 3)
+                    if key in seen:
+                        continue
+                    seen.add(key); keep.append((x0, y0))
+                    if len(keep) >= cap:
+                        break
+                uniq = keep
+            out[k] = uniq
+        return out
+
     def _pair_points(self, pairs):
         """返回 {pair: [(x,y),...]} —— 每一对省的公共边界像素(pair=(lo,hi))。"""
         import numpy as _np
@@ -861,6 +911,27 @@ class Editor:
                     pb = _centroid(_pt.get(_pk(e["b"], e["th"]), []))
                     if pa and pb:
                         e["path"] = [pa, pb]
+            # 兜底: 有些 adjacencies 的 through 并不与两端相邻 -> 用"海岸最近点对"画短线
+            _miss = [e for e in edges
+                     if e.get("type") in ("strait", "canal") and not e.get("path")]
+            if _miss:
+                import numpy as _np
+                _ids = []
+                for e in _miss:
+                    _ids.append(int(e["a"])); _ids.append(int(e["b"]))
+                _coast = self._coast_points(_ids)
+                for e in _miss:
+                    A = _coast.get(int(e["a"])) or []
+                    B = _coast.get(int(e["b"])) or []
+                    if not A or not B:
+                        continue
+                    aa = _np.asarray(A, dtype=_np.float64)
+                    bb = _np.asarray(B, dtype=_np.float64)
+                    d2 = ((aa[:, None, :] - bb[None, :, :]) ** 2).sum(-1)
+                    i, j = _np.unravel_index(int(_np.argmin(d2)), d2.shape)
+                    if float(d2[i, j]) <= 150.0 * 150.0:      # 只画真正的窄水道
+                        e["path"] = [[int(round(aa[i, 0])), int(round(aa[i, 1]))],
+                                     [int(round(bb[j, 0])), int(round(bb[j, 1]))]]
         except Exception:
             pass
         self._ladj = adj

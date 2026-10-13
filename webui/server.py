@@ -250,7 +250,19 @@ def summary_to_dict(s) -> dict:
 # --------------------------------------------------------------------------- #
 @app.route("/")
 def index():
-    return send_from_directory(app.static_folder, "index.html")
+    try:
+        with open(os.path.join(app.static_folder, "index.html"), "r", encoding="utf-8") as _f:
+            _html = _f.read()
+        _v = {}
+        for _name in ("app.js", "style.css"):
+            _p = os.path.join(app.static_folder, _name)
+            _v[_name] = str(int(os.path.getmtime(_p))) if os.path.isfile(_p) else "0"
+        _html = _html.replace('/static/app.js"', '/static/app.js?v=%s"' % _v["app.js"])
+        _html = _html.replace('/static/style.css"', '/static/style.css?v=%s"' % _v["style.css"])
+        return Response(_html, mimetype="text/html",
+                        headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
+    except Exception:
+        return send_from_directory(app.static_folder, "index.html")
 
 
 @app.route("/cache/<path:name>")
@@ -380,6 +392,14 @@ def api_cache_build():
     def work(tid):
         try:
             from webcache import build
+            try:
+                with EDIT["lock"]:
+                    _had = EDIT.get("ed") is not None
+                    EDIT["ed"] = None                 # 重建缓存 = 丢掉编辑器里未导出的改动
+                if _had:
+                    task_log(tid, "[提示] 已清除编辑器里未导出的改动(编辑缓存), 输出目录不受影响")
+            except Exception:
+                pass
             res = build(mod, CACHE_DIR, progress=lambda m: task_log(tid, m), game_dir=game,
                         game_merge=gmerge, overlay_dir=ref)
             task_finish(tid, result=res)
@@ -407,6 +427,17 @@ def _run_job(d, dry, tid):
         if cfg.game_dir:
             task_log(tid, "原版: %s" % cfg.game_dir)
         task_log(tid, "输出: %s" % cfg.out_dir)
+        if getattr(cfg, "in_place", False):
+            task_log(tid, "[注意] 勾选了『直接改原 mod (危险)』-> 结果将直接写入: %s（不写输出目录，且不会备份）" % cfg.mod_dir)
+        try:
+            _src = os.path.normcase(os.path.abspath(cfg.mod_dir or ""))
+            _out = os.path.normcase(os.path.abspath(cfg.out_dir or ""))
+            if _src and _out == _src:
+                task_log(tid, "[注意] 输出目录与数据来源目录相同 -> 会直接覆盖源目录(不会备份)")
+            elif _src and _out.startswith(_src + os.sep):
+                task_log(tid, "[注意] 输出目录在数据来源目录内部 -> 会改写其中的文件")
+        except Exception:
+            pass
         s = run(cfg, progress=lambda m: task_log(tid, m),
                 cancel=lambda: task_cancelled(tid))
         task_finish(tid, result=summary_to_dict(s))

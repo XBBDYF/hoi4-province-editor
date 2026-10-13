@@ -73,6 +73,70 @@ function _logAppend(el, m) {
     el.scrollTop = el.scrollHeight;
   });
 }
+/* ---------- CSS 弹窗(替代 alert/confirm) ---------- */
+function _uiModal() {
+  let el = document.getElementById('uiModal');
+  if (el) return el;
+  el = document.createElement('div');
+  el.id = 'uiModal';
+  el.className = 'uimodal';
+  el.innerHTML = '<div class="uimbox"><div class="uimmsg" id="uiModalMsg"></div>' +
+    '<div class="uimbtns"><button id="uiModalCancel" class="ghost">取消</button>' +
+    '<button id="uiModalOk" class="primary">确定</button></div></div>';
+  document.body.appendChild(el);
+  return el;
+}
+function uiDialog(msg, opts) {
+  opts = opts || {};
+  const cancelable = opts.cancel !== false;
+  const el = _uiModal();
+  const msgEl = document.getElementById('uiModalMsg');
+  const okBtn = document.getElementById('uiModalOk');
+  const cancelBtn = document.getElementById('uiModalCancel');
+  msgEl.textContent = String(msg == null ? '' : msg);
+  okBtn.textContent = opts.okText || '确定';
+  cancelBtn.textContent = opts.cancelText || '取消';
+  cancelBtn.style.display = cancelable ? '' : 'none';
+  el.classList.toggle('danger', !!opts.danger);
+  el.classList.add('on');
+  return new Promise((resolve) => {
+    const onKey = (e) => {
+      if (e.key === 'Escape' && cancelable) { e.preventDefault(); done(false); }
+      else if (e.key === 'Enter') { e.preventDefault(); done(true); }
+    };
+    const done = (v) => {
+      el.classList.remove('on');
+      okBtn.onclick = cancelBtn.onclick = el.onclick = null;
+      document.removeEventListener('keydown', onKey);
+      resolve(v);
+    };
+    okBtn.onclick = () => done(true);
+    cancelBtn.onclick = () => done(false);
+    el.onclick = (e) => { if (e.target === el && cancelable) done(false); };
+    document.addEventListener('keydown', onKey);
+    setTimeout(() => { try { okBtn.focus(); } catch (e) { } }, 0);
+  });
+}
+function uiConfirm(msg, opts) { return uiDialog(msg, opts); }
+function uiAlert(msg, opts) { return uiDialog(msg, Object.assign({ cancel: false }, opts || {})); }
+
+/* ---------- 总进度: 分阶段映射 + 只增不减 ---------- */
+let _progPct = 0;
+function _progPctFor(s) {
+  let m;
+  if ((m = s.match(/细化进度\s*(\d+)\s*\/\s*(\d+)/))) {
+    const f = (+m[2]) ? Math.min(1, (+m[1]) / (+m[2])) : 0;
+    return 12 + 58 * f;                                  // 逐个细化: 12% -> 70%
+  }
+  if (/开始逐个细化|检测到\s*\d+\s*个待细化/.test(s)) return 12;
+  if (/读取\s*definition|读取\s*provinces|建立像素索引|扫描\s*states|待细化地块|邻区过渡/.test(s)) return 6;
+  if (/均衡|清理边界|连通性|十字/.test(s)) return 76;
+  if (/写出|构建新地图邻接/.test(s)) return 88;
+  if (/运河|铁路|战略区|海峡|规则/.test(s)) return 93;
+  if (/完成|用时/.test(s)) return 100;
+  return null;
+}
+
 let _progBeat = null, _progT0 = 0, _progLast = '准备中…';
 function progShow(title) {
   const el = document.getElementById('bigProg'); if (!el) return;
@@ -80,7 +144,7 @@ function progShow(title) {
   const tx = document.getElementById('bpTxt'); if (tx) tx.textContent = '准备中…';
   const b = document.getElementById('bpBar'); if (b) { b.parentElement.classList.add('indet'); b.style.width = '0%'; }
   el.classList.add('on');
-  _progT0 = Date.now(); _progLast = '准备中…';
+  _progT0 = Date.now(); _progLast = '准备中…'; _progPct = 0;
   if (_progBeat) clearInterval(_progBeat);
   _progBeat = setInterval(() => {            // 每秒显示已等待时间, 避免"没动"的错觉
     const box = document.getElementById('bigProg');
@@ -95,12 +159,13 @@ function progStep(msg) {
   _progLast = s0;
   const tx = document.getElementById('bpTxt'); if (tx) tx.textContent = s0;
   const b = document.getElementById('bpBar');
-  let pct = null;
-  let mm = s0.match(/(\d+)\s*\/\s*(\d+)/);
-  if (mm && +mm[2] > 0) pct = Math.max(1, Math.min(99, Math.round(100 * (+mm[1]) / (+mm[2]))));
-  if (pct == null) { mm = s0.match(/(\d{1,3}(?:\.\d+)?)\s*%/); if (mm) pct = Math.max(1, Math.min(100, Math.round(+mm[1]))); }
+  let pct = _progPctFor(s0);
+  if (pct == null) { const mm = s0.match(/(\d{1,3}(?:\.\d+)?)\s*%/); if (mm) pct = Math.max(1, Math.min(100, Math.round(+mm[1]))); }
   if (pct == null) for (const [re, v] of PROG_STEP) { if (re.test(s0)) pct = v; }
-  if (b && pct != null) { b.parentElement.classList.remove('indet'); b.style.width = pct + '%'; }
+  if (pct != null) {
+    _progPct = Math.max(_progPct, Math.min(100, pct));     // 总进度: 只增不减
+    if (b) { b.parentElement.classList.remove('indet'); b.style.width = _progPct + '%'; }
+  }
 }
 function progHide() {
   if (_progTimer) { clearTimeout(_progTimer); _progTimer = null; }
@@ -158,7 +223,7 @@ async function serverAlive() {
 }
 async function needServer() {
   if (await serverAlive()) return true;
-  alert('服务没有响应：Web 服务可能未启动或已停止。\n请双击项目根目录的 ★一键启动Web编辑器.bat 重新启动后再试。');
+  await uiAlert('服务没有响应：Web 服务可能未启动或已停止。\n请双击项目根目录的 ★一键启动Web编辑器.bat 重新启动后再试。');
   return false;
 }
 
@@ -409,8 +474,7 @@ function draw() {
     ctx.drawImage(im, x, y, dw, dh);
   }
   ctx.globalAlpha = 1;
-  if (MapView.efill) ctx.drawImage(MapView.efill, x, y, dw, dh);
-  if (MapView.hl) ctx.drawImage(MapView.hl, x, y, dw, dh);
+  if (MapView.hl) ctx.drawImage(MapView.hl, x, y, dw, dh);   // 注意: efill 是编辑专用, 普通视图不画
   if (MapView.esel) ctx.drawImage(MapView.esel, x, y, dw, dh);
   const tgtL = MapView.layers.find(l => l.img === 'tgt');
   if (tgtL && tgtL.vis && MapView.tgt) {
@@ -990,7 +1054,7 @@ async function doEditMerge() {
 async function doEditDelete() {
   if (!App.editSel.length) { setMsg('先选一个省份'); return; }
   const id = App.editSel[0];
-  if (!confirm(`删除 #${id}（并入其最大邻居）？`)) return;
+  if (!(await uiConfirm(`删除 #${id}（并入其最大邻居）？`))) return;
   const r = await editPost('/api/edit/delete', { id });
   if (r.ok) { paintMerge(r.into, [id]); App.editSel = []; renderEditSel(); buildESel(); showEditOps(r.status); setMsg(`#${id} 已并入 #${r.into}`); }
   else setMsg('删除失败: ' + r.error);
@@ -1018,7 +1082,7 @@ async function doEditSimple(kind) {
 }
 async function doEditExport() {
   const cfg = collectCfg();
-  if (!confirm('导出编辑结果到输出目录：\n' + cfg.out_dir + '\n并重建地图缓存？')) return;
+  if (!(await confirmOut('导出编辑结果到输出目录（并重建地图缓存）：', cfg))) return;
   const log = $('#edOps'); log.textContent = '';
   await runJob('/api/edit/export', cfg, {
     onLog: (m) => { _logAppend(log, m); },
@@ -1086,7 +1150,9 @@ async function edLoadLayerMaps() {
 }
 function _norm(v) { return (v === undefined || v === null) ? '' : String(v).replace(/\.txt$/i, ''); }
 function edCur(pid, layer) {
-  const s = String(pid);
+  let sp = String(pid);
+  if (App.mergedOut && App.mergedOut[sp]) sp = String(App.mergedOut[sp]);   // 已合并的地块按其并入的地块算
+  const s = sp;
   if (layer === 'state') return _norm((pid in App.ovState) ? App.ovState[pid] : ((App.idx[s] || {}).state || ''));
   if (layer === 'sr') return _norm((pid in App.ovSr) ? App.ovSr[pid] : ((App.idx[s] || {}).sr || ''));
   if (layer === 'continent') return (pid in App.ovCont) ? App.ovCont[pid] : ((App.idx[s] || {}).continent || '0');
@@ -1187,11 +1253,14 @@ function edSyncLayerMaps() {
   requestDraw();
 }
 function edIndexBy() {
-  if (App._idxState) return;
+  // 必须用 edCur 读"当前"归属(含用户编辑), 不能用缓存索引, 否则改过州边界后
+  // 战略区/大洲层仍按旧边界分组 -> 点按结果与显示不一致。
   const byState = {}, bySr = {};
-  for (const p of App.provs) {
-    if (p.state) (byState[p.state] = byState[p.state] || []).push(p.id);
-    if (p.sr) (bySr[p.sr] = bySr[p.sr] || []).push(p.id);
+  for (const p of (App.provs || [])) {
+    const st = edCur(p.id, 'state');
+    const sr = edCur(p.id, 'sr');
+    if (st) (byState[st] = byState[st] || []).push(p.id);
+    if (sr) (bySr[sr] = bySr[sr] || []).push(p.id);
   }
   App._idxState = byState; App._idxSr = bySr;
 }
@@ -1288,7 +1357,7 @@ async function edOnClick(pid, shift) {
     if (!cur) {
       const info = App.idx[String(pid)] || {};
       if (layer === 'state' && (info.type === 'land' || info.type === 'lake')) {
-        if (!confirm(`地块 #${pid} 不属于任何州，直接新建一个州并放入它？`)) return;
+        if (!(await uiConfirm(`地块 #${pid} 不属于任何州，直接新建一个州并放入它？`))) return;
         const r = await editPost('/api/edit/new_state', {
           id: 0, provinces: [pid],
           owner: ($('#nsOwner') ? $('#nsOwner').value.trim() : ''),
@@ -1304,7 +1373,7 @@ async function edOnClick(pid, shift) {
           setMsg('已在 #' + pid + ' 新建州 ' + r.file + '（可在“编辑州”里改数据）');
         } else setMsg('新建州失败: ' + r.error);
       } else if (layer === 'sr') {
-        if (!confirm(`地块 #${pid} 不属于任何战略区，直接新建战略区并放入它？`)) return;
+        if (!(await uiConfirm(`地块 #${pid} 不属于任何战略区，直接新建战略区并放入它？`))) return;
         const nid = Number(($('#nsrId') && $('#nsrId').value) || 0);
         const r = await editPost('/api/edit/new_sr', { id: nid, provinces: [pid] });
         if (r.ok) {
@@ -1441,11 +1510,11 @@ async function edTerrainSave() {
 }
 async function edTerrainExport() {
   const r = await editPost('/api/edit/export_terrain', {});
-  if (r.ok) { setMsg('已导出 terrain.bmp: ' + (r.result && r.result.path)); alert('已生成并导出：\n' + ((r.result && r.result.path) || '')); }
+  if (r.ok) { setMsg('已导出 terrain.bmp: ' + (r.result && r.result.path)); await uiAlert('已生成并导出：\n' + ((r.result && r.result.path) || '')); }
   else setMsg('导出失败: ' + r.error);
 }
 async function edTerrainAuto() {
-  if (!confirm('用 terrain.bmp 自动生成所有陆地地块的地形（会覆盖 definition.csv 的地形列）？')) return;
+  if (!(await uiConfirm('用 terrain.bmp 自动生成所有陆地地块的地形（会覆盖 definition.csv 的地形列）？'))) return;
   const r = await editPost('/api/edit/terrain_auto', {});
   if (r.ok) { showEditOps(r.status); await edLoadTerrainData(); setMsg('已自动生成地形：' + (r.count || '') + ' 块'); }
   else setMsg('失败: ' + r.error);
@@ -1661,7 +1730,9 @@ function edApplyMode() {
   } else {
     if (em && em.checked) em.checked = false;
     App.editMode = false;
-    MapView.esel = null; MapView.tgtHL = null;    // 清掉编辑专用的高亮
+    // 清掉所有编辑专用图层(避免退出编辑后地图上残留"被修改的地块")
+    MapView.esel = null; MapView.tgtHL = null;
+    MapView.efill = null; MapView.efctx = null; MapView.efimg = null;
   }
   requestDraw();
 }
@@ -1935,10 +2006,46 @@ async function doAnalyze() {
   });
 }
 
+function outOverlapsMod(cfg) {
+  const norm = (p) => String(p || '').trim().replace(/[\\/]+$/, '').replace(/\//g, '\\').toLowerCase();
+  const src = norm(cfg.mod_dir || cfg.game_dir);
+  const out = norm(cfg.out_dir);
+  if (!src || !out) return null;
+  if (out === src) return 'same';
+  if (out.indexOf(src + '\\') === 0) return 'inside';
+  return null;
+}
+async function confirmOut(action, cfg) {
+  const ow = outOverlapsMod(cfg);
+  const mod = String(cfg.mod_dir || '').trim();
+  const src = mod || String(cfg.game_dir || '').trim();
+  const label = mod ? 'mod' : '原版游戏';
+  const inPlace = !!cfg.in_place;
+  const target = inPlace ? (mod || src) : cfg.out_dir;
+  let head = '';
+  if (inPlace) {
+    head = '⚠⚠ 严重提示：你勾选了【⚠ 直接改原 mod (危险)】！\n' +
+      (mod ? ('会直接修改 mod 目录（不写输出目录）：\n' + mod)
+           : ('没有填 mod —— 这会直接修改【原版游戏】目录：\n' + src)) +
+      '\n原文件不会备份，无法恢复。\n\n';
+  } else if (ow === 'same') {
+    head = '⚠⚠ 严重提示：输出目录和' + label + '目录【完全相同】！\n' +
+      (mod ? '' : '你没有填 mod —— 这会覆盖【原版游戏】本身！\n') +
+      '细化会先清空该目录、再写回结果，原文件无法恢复。\n\n';
+  } else if (ow === 'inside') {
+    head = '⚠ 提示：输出目录在' + label + '目录【内部】！\n' +
+      '写出的文件会直接改写 ' + label + ' 里的对应文件（谨慎操作）。\n\n';
+  }
+  return uiConfirm(head + action + '\n' + target +
+    '\n\n数据来源（' + (mod ? 'mod' : '原版游戏') + '）：' + (src || '(未设置)') +
+    (inPlace ? '\n写入方式：直接改源目录（勾选了"直接改原 mod (危险)"）'
+             : '\n覆盖检查：' + (ow ? '会覆盖 ' + label + '！' : '输出与 ' + label + ' 不同，不会覆盖源目录')) +
+    '\n\n继续吗？', { danger: !!head });
+}
 async function doRun() {
   if (!(await needServer())) return;
   const cfg = collectCfg();
-  if (!confirm('将开始细化并写出文件到输出目录：\n' + cfg.out_dir + '\n\n继续吗？')) return;
+  if (!(await confirmOut('将开始细化并写出文件到输出目录：', cfg))) return;
   setBusy('run', true);
   $('#log').textContent = '';
   $('#runSummary').textContent = '运行中…';
@@ -2004,7 +2111,7 @@ async function doAudit() {
 async function doRepair() {
   if (!(await needServer())) return;
   const cfg = collectCfg();
-  if (!confirm('将按当前参数【只修复、不拆分】，把修正写到输出目录：\n' + cfg.out_dir + '\n\n继续吗？')) return;
+  if (!(await confirmOut('将按当前参数【只修复、不拆分】，把修正写到输出目录：', cfg))) return;
   $('#btnRepair').disabled = true; $('#btnAudit').disabled = true;
   $('#repSpinner').style.display = 'inline-flex';
   const log = $('#repairLog'); log.textContent = '';
@@ -2120,7 +2227,7 @@ async function buildCache() {
       setMsg('缓存完成');
       await boot(true);
     },
-    onErr: (e) => { $('#btnCache').disabled = false; setMsg('缓存失败: ' + fmtErr(e)); alert('缓存构建失败:\n' + fmtErr(e)); },
+    onErr: async (e) => { $('#btnCache').disabled = false; setMsg('缓存失败: ' + fmtErr(e)); await uiAlert('缓存构建失败:\n' + fmtErr(e)); },
   });
   return t;
 }

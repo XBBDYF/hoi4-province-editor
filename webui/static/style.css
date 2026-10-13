@@ -201,3 +201,11 @@ pre.code{background:#0e1116;border:1px solid var(--line);border-radius:6px;paddi
 }
 #findbox input{width:150px}
 #findbox button{background:rgba(20,24,30,.93);border:1px solid var(--line);padding:6px 9px}
+
+.uimodal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;z-index:9999;align-items:center;justify-content:center}
+.uimodal.on{display:flex}
+.uimodal .uimbox{background:#161b22;border:1px solid var(--line);border-radius:10px;padding:16px 18px;max-width:min(680px,92vw);max-height:80vh;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.55)}
+.uimodal.danger .uimbox{border-color:#7a2b2b;background:#1d1416}
+.uimodal .uimmsg{white-space:pre-wrap;line-height:1.6;font-size:13px;color:var(--fg)}
+.uimodal .uimbtns{margin-top:14px;display:flex;justify-content:flex-end;gap:8px}
+.uimodal .uimbtns button{min-width:76px}
