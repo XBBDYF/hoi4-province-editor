@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>HOI4 地块细化 · Web 控制台</title>
 <link rel="stylesheet" href="/static/style.css">
+<script>(function(){try{if(localStorage.getItem("hoi4-theme")==="light")document.documentElement.setAttribute("data-theme","light");}catch(e){}})();</script>
 </head>
 <body>
 <header id="topbar">
@@ -14,6 +15,7 @@
     <label>原版</label><input id="gameDir" spellcheck="false">
     <label>输出</label><input id="outDir" spellcheck="false">
     <button id="btnCache">构建/刷新缓存</button>
+    <button id="themeToggle" class="ghost" title="切换 浅色 / 暗色 主题">浅色主题</button>
     <span id="cacheChip" class="chip">缓存: 检查中…</span>
   </div>
 </header>
@@ -57,6 +59,7 @@
       <span>省份 <b id="stProv">–</b></span>
       <span>已选 <b id="stSel">无</b></span>
       <span>细化目标 <b id="stTargets">无</b></span>
+      <span class="tiny">快捷键 <kbd>F</kbd> 搜索 · <kbd>Ctrl</kbd>+<kbd>Z</kbd>/<kbd>Y</kbd> 撤销·重做 · <kbd>Esc</kbd> 清选</span>
       <span style="margin-left:auto" id="stMsg"></span>
     </div>
   </main>
@@ -177,6 +180,7 @@
         </div>
         <fieldset><legend>操作方式</legend>
           <div id="edTarget" class="tiny" style="color:var(--accent)">当前目标：未选择</div>
+          <div id="edHint" class="hint">按当前图层给出操作提示。</div>
           <p class="hint">点击一个地块＝选它所在的<b>州/战略区/大洲</b>为目标（整片会描边）；<b>Shift+点击</b>＝把该地块加入/移出目标；空地块 Shift 点击会直接加入。州层只能放陆地/湖泊。</p>
         </fieldset>
         <fieldset><legend>当前选中 / 地块信息</legend>
@@ -220,7 +224,7 @@
           <div id="railInfo" class="tiny" style="color:var(--accent)">未选中铁路</div>
           <div class="row"><label>等级</label><input id="railLevel" type="number" min="1" max="5" value="3" style="width:70px"><button id="railLevelSave">保存等级</button><button id="railDel" class="ghost">删除铁路</button></div>
           <div class="row"><label>新建等级</label><input id="railNewLevel" type="number" min="1" max="5" value="3" style="width:70px"><button id="railClearSel" class="ghost">取消选中</button></div>
-          <div class="row"><label class="check"><input type="checkbox" id="adjStrait">海峡</label><label class="check"><input type="checkbox" id="adjCanal">运河</label><label class="check"><input type="checkbox" id="adjImpass">不可通行屏障</label></div>
+          <div class="row"><label class="check"><input type="checkbox" id="adjStrait">海峡</label><label class="check"><input type="checkbox" id="adjCanal">运河</label><label class="check"><input type="checkbox" id="adjImpass">不可通行屏障</label><label class="check"><input type="checkbox" id="adjFar">远距离连线</label></div>
           <div id="railStat" class="tiny"></div>
         </fieldset>
         <fieldset id="fsNewSr" style="display:none"><legend>新建战略区</legend>

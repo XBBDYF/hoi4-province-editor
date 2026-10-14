@@ -1026,6 +1026,77 @@ async function editRefresh() {
     else setMsg('编辑状态读取失败: ' + r.error);
   } catch (e) { setMsg('编辑状态读取失败: ' + e.message); }
 }
+function applyTheme(t) {
+  const light = (t === 'light');
+  document.documentElement.setAttribute('data-theme', light ? 'light' : 'dark');
+  try { localStorage.setItem('hoi4-theme', light ? 'light' : 'dark'); } catch (e) { }
+  const b = document.getElementById('themeToggle');
+  if (b) b.textContent = light ? '暗色主题' : '浅色主题';
+}
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  applyTheme(cur === 'light' ? 'dark' : 'light');
+  if (typeof setMsg === 'function') setMsg('已切换主题：' + (cur === 'light' ? '暗色' : '浅色'));
+}
+function initTheme() {
+  let t = 'dark';
+  try { t = localStorage.getItem('hoi4-theme') || 'dark'; } catch (e) { }
+  applyTheme(t);
+  const b = document.getElementById('themeToggle');
+  if (b) b.onclick = (e) => { if (e) e.__flx = true; toggleTheme(); };
+}
+/* 兜底: 即使上面的直接绑定因故没生效, 这两个按钮也能响应; e.__flx 防止重复触发 */
+document.addEventListener('click', (e) => {
+  const t = (e.target && e.target.closest) ? e.target.closest('#themeToggle,#btnCache') : null;
+  if (!t || e.__flx) return;
+  if (t.id === 'themeToggle') toggleTheme();
+  else if (t.id === 'btnCache' && !t.disabled && typeof buildCache === 'function') buildCache();
+});
+/* 兜底: 载入时清掉可能残留的遮罩(否则会盖住整页导致"点不动"), 并复位缓存按钮 */
+document.addEventListener('DOMContentLoaded', () => {
+  try {
+    ['bigProg', 'uiModal'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.classList.remove('on');
+    });
+    const bc = document.getElementById('btnCache');
+    if (bc) bc.disabled = false;
+  } catch (e) { }
+});
+let _tabRestored = false;
+function restoreLastTab() {
+  if (_tabRestored) return;
+  _tabRestored = true;
+  try {
+    const t0 = localStorage.getItem('hoi4-tab');
+    if (!t0 || t0 === 'map') return;
+    const b = $$('#side .tabs button').find(x => x.dataset.tab === t0);
+    if (b) b.onclick();
+  } catch (e) { }
+}
+function initShortcuts() {
+  document.addEventListener('keydown', (e) => {
+    const md = document.getElementById('uiModal');
+    if (md && md.classList.contains('on')) return;              // 弹窗自己处理 Esc/Enter
+    const el = e.target || {};
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName || '') || el.isContentEditable;
+    if (!typing && (e.key === 'f' || e.key === 'F' || e.key === '/')) {
+      const q = $('#findQuery');
+      if (q) { e.preventDefault(); q.focus(); q.select(); }
+      return;
+    }
+    if (!typing && e.key === 'Escape') {
+      App.findIds = null; buildESel([]); selectProvince(null); setMsg('已清除选中');
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && !typing) {
+      const k = (e.key || '').toLowerCase();
+      if (!App.editMode) return;
+      if (k === 'z' || k === 'y') { e.preventDefault(); doEditSimple((k === 'y' || e.shiftKey) ? 'redo' : 'undo'); }
+      else if (k === 's') { e.preventDefault(); doEditExport(); }
+    }
+  });
+}
 async function edEnterRefresh() {
   // 进入编辑页时: 以界面下拉为准同步图层, 再重载图层样式并重放已记录的操作
   const sel = $('#edLayer');
@@ -1546,7 +1617,7 @@ function _lvColor(l) {
 function _drawAdjEdges(ctx) {
   const E = (App.railData && App.railData.edges) || [];
   if (!E.length) return;
-  if (!App.adjShow) App.adjShow = { strait: false, canal: true, impassable: true };
+  if (!App.adjShow) App.adjShow = { strait: true, canal: true, impassable: true, far: false };
   const { s, x, y } = MapView.cam;
   // 后端给的是地图原始像素坐标(如 5632x2048), 前端按显示分辨率(如 2816x1024)绘制 -> 需按比例换算
   const k = (App.meta && App.meta.width) ? (MapView.W / App.meta.width) : 1;
@@ -1573,6 +1644,16 @@ function _drawAdjEdges(ctx) {
       for (let k = 1; k < P.length; k++) ctx.lineTo(P[k][0], P[k][1]);
       ctx.stroke();
     }
+  }
+  if (App.adjShow.far) {          // 可选: 把没有近距离几何的连接(多为港口/海上连接)用细虚线画出来
+    for (const e of E) {
+      if (e.path || !e.far) continue;
+      const col = e.type === 'canal' ? '#ffd23f' : (e.type === 'strait' ? '#33d6ff' : '#ff3b3b');
+      ctx.setLineDash([4, 6]); ctx.strokeStyle = col; ctx.lineWidth = 1.2; ctx.globalAlpha = 0.55;
+      const P = e.far.map(T);
+      ctx.beginPath(); ctx.moveTo(P[0][0], P[0][1]); ctx.lineTo(P[1][0], P[1][1]); ctx.stroke();
+    }
+    ctx.globalAlpha = 1; ctx.setLineDash([]);
   }
   ctx.restore();
 }
@@ -1750,6 +1831,15 @@ function edSyncPanels() {
   if ($('#fsNewSr')) $('#fsNewSr').style.display = (L === 'sr') ? '' : 'none';
   if ($('#fsProv')) $('#fsProv').style.display = (L === 'prov') ? '' : 'none';
   if ($('#fsTerrain')) $('#fsTerrain').style.display = (L === 'terrain') ? '' : 'none';
+  const HINTS = {
+    state: '点击一个地块 = 选它所在的州为目标；Shift+点击 = 把该地块加入/移出目标州；点到不属于任何州的地块 = 新建州。',
+    sr: '点击一个地块 = 选它所在的战略区为目标；Shift+点击 = 把“整个州”加入/移出目标战略区。',
+    continent: '点击一个地块 = 选大洲为目标；Shift+点击 = 把“整个战略区”的陆地地块改成目标大洲。',
+    prov: '点击 = 选中地块；Shift+点击 = 多选；再用上面的“合并 / 删除（并入最大邻居）”。',
+    rail: 'Shift+点两个地块 = 自动建铁路（只走陆地，可跨海峡/运河）；点铁路线 = 选中改等级/删除；点地块 = 增删补给中心。',
+    terrain: '点击地块 = 选中并在下面选地形保存；也可一键自动生成，或由 definition.csv 反向导出 terrain.bmp。',
+  };
+  if ($('#edHint')) $('#edHint').textContent = HINTS[L] || '';
   if (L === 'terrain' && !App.terrain) edLoadTerrainData();
   if (L === 'sr') edLoadSrData();
   if (L === 'rail') edLoadRailData();
@@ -1889,6 +1979,7 @@ function initTabs() {
     b.onclick = () => {
       $$('#side .tabs button').forEach(x => x.classList.toggle('active', x === b));
       const tab = b.dataset.tab;
+      try { localStorage.setItem('hoi4-tab', tab); } catch (e) { }
       $$('.pane').forEach(p => p.classList.toggle('active', p.dataset.pane === tab));
       side.classList.toggle('wide', tab === 'prov' || tab === 'report' || tab === 'analyze');
       const pane = $(`.pane[data-pane="${tab}"]`);
@@ -2281,17 +2372,19 @@ async function boot(reload) {
     if (App.editLayer === 'terrain') await edLoadTerrainData();
     if (App.editLayer === 'rail') await edLoadRailData();
   }
+  restoreLastTab();
   edApplyMode();
   setMsg('就绪');
 }
 
 function initUI() {
+  initTheme();
   App.cfgTpl = buildCfgForm();
   $('.pane[data-pane="refine"]').appendChild(App.cfgTpl);
   loadCfg();
   initTabs();
 
-  $('#btnCache').onclick = buildCache;
+  $('#btnCache').onclick = (e) => { if (e) e.__flx = true; buildCache(); };
   $('#zIn').onclick = () => { const a = $('#maparea'); zoomAt(a.clientWidth / 2, a.clientHeight / 2, 1.25); };
   $('#zOut').onclick = () => { const a = $('#maparea'); zoomAt(a.clientWidth / 2, a.clientHeight / 2, 0.8); };
   $('#zFit').onclick = fitView;
@@ -2368,16 +2461,17 @@ function initUI() {
   if ($('#edSupOff')) $('#edSupOff').onclick = () => edExtra('supply', 'remove');
   if ($('#edBldAdd')) $('#edBldAdd').onclick = () => edExtra('building', 'add');
   if ($('#btnCheckIds')) $('#btnCheckIds').onclick = () => { edFillNextIds(); setMsg('已重新核对可用 ID'); };
+  initShortcuts();
   // 海峡/运河/不可通行 显示开关(记忆)
-  const _adjMap = { adjStrait: 'strait', adjCanal: 'canal', adjImpass: 'impassable' };
-  try { const sv = JSON.parse(localStorage.getItem('hoi4-adjshow') || 'null'); if (sv) App.adjShow = sv; } catch (e) { }
-  App.adjShow = Object.assign({ strait: false, canal: true, impassable: true }, App.adjShow || {});
+  const _adjMap = { adjStrait: 'strait', adjCanal: 'canal', adjImpass: 'impassable', adjFar: 'far' };
+  try { const sv = JSON.parse(localStorage.getItem('hoi4-adjshow-v2') || 'null'); if (sv) App.adjShow = sv; } catch (e) { }
+  App.adjShow = Object.assign({ strait: true, canal: true, impassable: true, far: false }, App.adjShow || {});
   for (const id in _adjMap) {
     const el = $('#' + id); if (!el) continue;
     el.checked = !!App.adjShow[_adjMap[id]];
     el.onchange = () => {
       App.adjShow[_adjMap[id]] = el.checked;
-      try { localStorage.setItem('hoi4-adjshow', JSON.stringify(App.adjShow)); } catch (e) { }
+      try { localStorage.setItem('hoi4-adjshow-v2', JSON.stringify(App.adjShow)); } catch (e) { }
       requestDraw();
     };
   }

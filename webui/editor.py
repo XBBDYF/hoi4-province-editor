@@ -929,9 +929,14 @@ class Editor:
                     bb = _np.asarray(B, dtype=_np.float64)
                     d2 = ((aa[:, None, :] - bb[None, :, :]) ** 2).sum(-1)
                     i, j = _np.unravel_index(int(_np.argmin(d2)), d2.shape)
-                    if float(d2[i, j]) <= 150.0 * 150.0:      # 只画真正的窄水道
-                        e["path"] = [[int(round(aa[i, 0])), int(round(aa[i, 1]))],
-                                     [int(round(bb[j, 0])), int(round(bb[j, 1]))]]
+                    _pair = [[int(round(aa[i, 0])), int(round(aa[i, 1]))],
+                             [int(round(bb[j, 0])), int(round(bb[j, 1]))]]
+                    # 海峡按"窄水道"150px; 运河可以跨更宽的水面(900px); 更远的存起来备选显示
+                    _lim = 900.0 * 900.0 if e.get("type") == "canal" else 150.0 * 150.0
+                    if float(d2[i, j]) <= _lim:
+                        e["path"] = _pair
+                    else:
+                        e["far"] = _pair
         except Exception:
             pass
         self._ladj = adj

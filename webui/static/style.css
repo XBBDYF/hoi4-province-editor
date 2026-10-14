@@ -209,3 +209,126 @@ pre.code{background:#0e1116;border:1px solid var(--line);border-radius:6px;paddi
 .uimodal .uimmsg{white-space:pre-wrap;line-height:1.6;font-size:13px;color:var(--fg)}
 .uimodal .uimbtns{margin-top:14px;display:flex;justify-content:flex-end;gap:8px}
 .uimodal .uimbtns button{min-width:76px}
+
+
+/* ================= 设计系统优化 pass (tokens / 可访问性 / 排版一致性) ================= */
+:root{
+  /* primitive tokens */
+  --c-space-1:4px; --c-space-2:6px; --c-space-3:8px; --c-space-4:12px; --c-space-5:16px; --c-space-6:24px;
+  --c-radius-1:4px; --c-radius-2:6px; --c-radius-3:8px; --c-radius-4:10px;
+  --font-xs:11px; --font-sm:12px; --font-md:13px; --font-lg:15px;
+  --font-mono:"Cascadia Mono",Consolas,"SF Mono",ui-monospace,monospace;
+  --dur-fast:.12s; --dur:.18s;
+  /* semantic tokens */
+  --surface-1:var(--panel); --surface-2:var(--panel2); --surface-sunken:#12151b;
+  --text-1:var(--fg); --text-2:var(--muted); --border-1:var(--line);
+  --ring:0 0 0 2px rgba(90,169,230,.6);
+  --elev-1:0 2px 8px rgba(0,0,0,.28);
+  --elev-2:0 8px 26px rgba(0,0,0,.42);
+}
+/* 键盘可达性: 鼠标点击不出焦点环, 键盘聚焦才有 */
+:where(button,input,select,textarea,a,[tabindex]):focus{outline:none}
+:where(button,input,select,textarea,a,[tabindex]):focus-visible{outline:none;box-shadow:var(--ring);border-color:var(--accent2)}
+/* 控件尺寸/状态一致 */
+button,input,select{min-height:28px}
+input[type=checkbox],input[type=radio],input[type=range]{min-height:0}
+button{transition:background var(--dur-fast),border-color var(--dur-fast),color var(--dur-fast),transform var(--dur-fast)}
+button:hover{background:#2a3140}
+button.primary:hover{background:#e8b352;filter:none}
+button:active:not(:disabled){transform:translateY(1px) scale(.99)}
+button:disabled{filter:saturate(.5)}
+/* 分组与间距: 统一节奏, 减少重阴影 */
+fieldset{margin:0 0 var(--c-space-4);padding:var(--c-space-4) var(--c-space-4) var(--c-space-5);
+  border-radius:var(--c-radius-3);background:rgba(255,255,255,.012)}
+fieldset legend{color:var(--muted);font-size:var(--font-xs);letter-spacing:.06em;text-transform:uppercase;padding:0 var(--c-space-2)}
+.pane > .toolbar{margin:0 0 var(--c-space-4)}
+.grid{gap:var(--c-space-3) var(--c-space-4)}
+.hint{line-height:1.55}
+.tiny{line-height:1.5}
+/* 侧栏: 标签不吸顶(保持原有滚动行为), 内容独立滚动 */
+#side .tabs{position:static;background:var(--panel)}
+#side .tabs button{transition:color var(--dur-fast),border-color var(--dur-fast),background var(--dur-fast)}
+#side .panes{padding:var(--c-space-4) var(--c-space-4) var(--c-space-5)}
+/* 地图浮层统一观感: 统一圆角/边框/轻微背景模糊, 阴影降级 */
+#layers,#maptools button,#findbox select,#findbox input,#findbox button,#legend,#tgtBox{
+  background:rgba(20,24,30,.9);backdrop-filter:blur(6px);
+  border:1px solid var(--border-1);border-radius:var(--c-radius-3);
+}
+#layers,#legend,#tgtBox,#tooltip{box-shadow:var(--elev-2)}
+/* 状态栏与快捷键 */
+#statusbar{gap:var(--c-space-5)}
+#statusbar kbd{margin:0 1px}
+kbd{font-family:var(--font-mono);font-size:10.5px;line-height:1;padding:2px 5px;border-radius:var(--c-radius-1);
+  background:var(--surface-sunken);border:1px solid var(--border-1);border-bottom-width:2px;color:var(--text-2);white-space:nowrap}
+/* 数据用等宽 */
+#stPos,#stProv,#stZoom,.mono,code,pre{font-family:var(--font-mono)}
+/* 表格: 等宽数字 + 斑马纹 */
+.tbl td.num{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.tbl tbody tr:nth-child(even) td{background:rgba(255,255,255,.015)}
+/* 窄屏: 顶栏允许换行, 避免挤压 */
+@media (max-width:1180px){
+  #topbar{height:auto;min-height:52px;flex-wrap:wrap;padding:var(--c-space-2) var(--c-space-4)}
+  #app{height:calc(100% - 84px)}
+}
+/* 减少动态效果 */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important}
+}
+
+
+/* ================= 浅色主题 (data-theme="light") ================= */
+:root[data-theme="light"]{
+  color-scheme:light;
+  --bg:#f6f5f1; --panel:#ffffff; --panel2:#f0efea; --line:#e3e1da;
+  --fg:#24272c; --muted:#6e7580; --accent:#a96a15; --accent2:#2f6f9f;
+  --ok:#2f7d4f; --warn:#8a6208; --err:#a5352f; --sel:#b07a10;
+  --surface-sunken:#f3f2ee;
+  --ring:0 0 0 2px rgba(47,111,159,.35);
+  --elev-1:0 1px 2px rgba(30,34,40,.06);
+  --elev-2:0 6px 20px rgba(30,34,40,.10);
+}
+:root[data-theme="light"] body{background:var(--bg);color:var(--fg)}
+:root[data-theme="light"] #topbar{background:var(--panel);border-bottom:1px solid var(--line)}
+:root[data-theme="light"] #mapwrap{background:#e9e7e2}
+:root[data-theme="light"] #statusbar{background:var(--panel)}
+:root[data-theme="light"] input,:root[data-theme="light"] select,:root[data-theme="light"] textarea{background:#fff;color:var(--fg)}
+:root[data-theme="light"] button{background:var(--panel2);color:var(--fg)}
+:root[data-theme="light"] button:hover{background:#e7e5df}
+:root[data-theme="light"] button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+:root[data-theme="light"] button.primary:hover{background:#95600f}
+:root[data-theme="light"] .chip{background:#fff}
+:root[data-theme="light"] #layers,:root[data-theme="light"] #maptools button,
+:root[data-theme="light"] #findbox select,:root[data-theme="light"] #findbox input,
+:root[data-theme="light"] #findbox button,:root[data-theme="light"] #legend,
+:root[data-theme="light"] #tgtBox{background:rgba(255,255,255,.92);border-color:var(--line)}
+:root[data-theme="light"] #tooltip{background:rgba(255,255,255,.97);color:var(--fg)}
+:root[data-theme="light"] #tooltip .t-row{color:var(--muted)}
+:root[data-theme="light"] #log,:root[data-theme="light"] pre.code{background:#fbfbf9;color:#33383f}
+:root[data-theme="light"] .tbl th{background:var(--panel2)}
+:root[data-theme="light"] .tbl tbody tr:nth-child(even) td{background:rgba(0,0,0,.015)}
+:root[data-theme="light"] .tbl tr:hover td{background:#f2f1ec}
+:root[data-theme="light"] .stat{border-bottom-color:#e8e6e0}
+:root[data-theme="light"] fieldset{background:rgba(0,0,0,.008)}
+:root[data-theme="light"] legend{color:var(--accent)}
+:root[data-theme="light"] kbd{background:var(--surface-sunken);color:var(--muted)}
+:root[data-theme="light"] #bigProg{background:rgba(240,240,236,.62)}
+:root[data-theme="light"] .bp-box{background:var(--panel);border-color:var(--line)}
+:root[data-theme="light"] .bp-title{color:var(--fg)}
+:root[data-theme="light"] .bp-bar{background:#eceae4}
+:root[data-theme="light"] .bp-bar i{background:linear-gradient(90deg,#c2872f,#e0bb72)}
+:root[data-theme="light"] .uimodal{background:rgba(40,44,50,.35)}
+:root[data-theme="light"] .uimodal .uimbox{background:var(--panel);border-color:var(--line);box-shadow:var(--elev-2)}
+:root[data-theme="light"] .uimodal.danger .uimbox{border-color:#c98b86;background:#fdf6f5}
+:root[data-theme="light"] .uimodal .uimmsg{color:var(--fg)}
+:root[data-theme="light"] .badge.bad{color:#a5352f;border-color:#e3b7b3}
+:root[data-theme="light"] .badge.ok{color:#2f7d4f;border-color:#b9d9c4}
+:root[data-theme="light"] .badge.warn{color:#8a6208;border-color:#e6d8a8;background:rgba(176,122,16,.08)}
+:root[data-theme="light"] #side .tabs button.active{color:#1c1f24;background:#eeede8}
+:root[data-theme="light"] .swatch{border-color:rgba(0,0,0,.25)}
+/* 浅色滚动条 */
+:root[data-theme="light"] *{scrollbar-color:#c9c7c0 #f2f1ec}
+:root[data-theme="light"] ::-webkit-scrollbar{background:#f2f1ec}
+:root[data-theme="light"] ::-webkit-scrollbar-track{background:#f2f1ec}
+:root[data-theme="light"] ::-webkit-scrollbar-thumb{background:#cdcbc4;border-color:#f2f1ec;background-clip:padding-box}
+:root[data-theme="light"] ::-webkit-scrollbar-thumb:hover{background:#b6b4ad;background-clip:padding-box}
+:root[data-theme="light"] ::-webkit-scrollbar-corner{background:#f2f1ec}
