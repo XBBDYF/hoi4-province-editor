@@ -18,6 +18,7 @@ import sys
 import argparse
 import importlib.util
 import subprocess
+import webbrowser
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -95,6 +96,58 @@ def install_with_fallback(pkgs, prefer=None):
     return False
 
 
+def _probe(port):
+    """返回 'ok'(已在运行且响应) / 'occupied'(端口被占但不响应) / 'free'"""
+    import socket
+    s = socket.socket()
+    s.settimeout(0.6)
+    try:
+        listening = (s.connect_ex(("127.0.0.1", int(port))) == 0)
+    finally:
+        s.close()
+    if not listening:
+        return "free"
+    try:
+        import urllib.request
+        with urllib.request.urlopen("http://127.0.0.1:%d/api/state" % int(port), timeout=2) as r:
+            if getattr(r, "status", 0) == 200:
+                return "ok"
+    except Exception:
+        pass
+    return "occupied"
+
+
+def _port_owner_pids(port):
+    import re
+    pids = set()
+    try:
+        out = subprocess.run(["netstat", "-ano", "-p", "tcp"], capture_output=True, text=True, timeout=20).stdout
+    except Exception:
+        return pids
+    for ln in out.splitlines():
+        if (":%d" % int(port)) in ln and "LISTENING" in ln.upper():
+            m = re.search(r"(\d+)\s*$", ln.strip())
+            if m:
+                pids.add(m.group(1))
+    return pids
+
+
+def _kill_port_owner(port):
+    pids = _port_owner_pids(port)
+    if not pids:
+        print("  没找到占用 %d 的进程(可能需要管理员权限查看)。" % int(port))
+        return False
+    ok = False
+    for pid in sorted(pids):
+        print("  结束占用端口 %d 的进程 PID=%s ..." % (int(port), pid))
+        try:
+            if subprocess.call(["taskkill", "/PID", str(pid), "/F"]) == 0:
+                ok = True
+        except Exception as e:
+            print("    失败: %s" % e)
+    return ok
+
+
 def main():
     ap = argparse.ArgumentParser(add_help=True)
     ap.add_argument("--check", action="store_true", help="只检测依赖, 不启动服务器")
@@ -150,6 +203,37 @@ def main():
         still = missing()
         if still:
             print("\n[警告] 仍然缺少: %s，服务器可能启动失败。" % ", ".join(m[0] for m in still))
+
+    st = _probe(args.port)
+    if st == "ok":
+        print("\n[提示] 检测到 Web 服务已经在运行 (端口 %d)。" % args.port)
+        print("       不会重复启动；直接打开浏览器即可。")
+        print("       如需重启：关掉原来的服务窗口(或结束后台 python 进程)后再运行本程序。")
+        try:
+            webbrowser.open("http://127.0.0.1:%d/" % args.port)
+        except Exception:
+            pass
+        try:
+            input("\n按回车退出...")
+        except Exception:
+            pass
+        return 0
+    if st == "occupied":
+        print("\n[警告] 端口 %d 已被占用，但服务没有响应(可能是僵死的旧进程)。" % args.port)
+        if args.yes:
+            _kill_port_owner(args.port)
+        else:
+            try:
+                ans = input("是否结束占用该端口的进程并重新启动? [Y/n]: ").strip().lower()
+            except EOFError:
+                ans = ""
+            if ans in ("", "y", "yes", "是"):
+                if not _kill_port_owner(args.port):
+                    print("[退出] 无法释放端口，请手动结束占用进程后再试。")
+                    return 1
+            else:
+                print("[退出] 端口被占用，未启动。")
+                return 1
 
     print("\n" + "-" * 58)
     print("  正在启动 Web 服务 (端口 %d) …" % args.port)

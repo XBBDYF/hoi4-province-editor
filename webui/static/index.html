@@ -3,19 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>HOI4 地块细化 · Web 控制台</title>
+<title data-i18n="app.title">HOI4 地块细化 · Web 控制台</title>
 <link rel="stylesheet" href="/static/style.css">
 <script>(function(){try{if(localStorage.getItem("hoi4-theme")==="light")document.documentElement.setAttribute("data-theme","light");}catch(e){}})();</script>
 </head>
 <body>
 <header id="topbar">
-  <div class="brand">🗺️ HOI4 地块细化<span class="sub">Project_IRIS Web 控制台</span></div>
+  <div class="brand"><span data-i18n="brand.name">HOI4 地块细化</span><span class="sub" data-i18n="brand.sub">Web 控制台</span></div>
   <div class="paths">
-    <label>mod</label><input id="modDir" spellcheck="false" placeholder="留空=只加载原版">
-    <label>原版</label><input id="gameDir" spellcheck="false">
-    <label>输出</label><input id="outDir" spellcheck="false">
-    <button id="btnCache">构建/刷新缓存</button>
-    <button id="themeToggle" class="ghost" title="切换 浅色 / 暗色 主题">浅色主题</button>
+    <label data-i18n="top.mod">mod</label><input id="modDir" spellcheck="false" data-i18n-ph="top.modPh" placeholder="留空=只加载原版">
+    <label data-i18n="top.game">原版</label><input id="gameDir" spellcheck="false">
+    <label data-i18n="top.out">输出</label><input id="outDir" spellcheck="false">
+    <button id="btnCache" data-i18n="top.buildCache">构建/刷新缓存</button>
+    <button id="themeToggle" class="ghost" data-i18n-title="top.theme.tip" title="切换 浅色 / 暗色 主题" data-i18n="top.theme.light">浅色主题</button>
+    <select id="langSelect" title="语言" data-i18n-title="lang.label" style="min-width:104px"></select>
     <span id="cacheChip" class="chip">缓存: 检查中…</span>
   </div>
 </header>
@@ -30,88 +31,88 @@
     <div id="maparea">
       <canvas id="map"></canvas>
       <div id="layers">
-        <h4>图层</h4>
+        <h4 data-i18n="layers.title">图层</h4>
         <div id="layerList"></div>
       </div>
       <div id="maptools">
-        <button id="zIn" title="放大">＋</button>
-        <button id="zOut" title="缩小">－</button>
-        <button id="zFit" title="适应窗口">适应</button>
-        <button id="z1" title="1:1">1:1</button>
+        <button id="zIn" data-i18n-title="tool.zoomIn" title="放大">＋</button>
+        <button id="zOut" data-i18n-title="tool.zoomOut" title="缩小">－</button>
+        <button id="zFit" data-i18n-title="tool.fit" title="适应窗口" data-i18n="tool.fitShort">适应</button>
+        <button id="z1" data-i18n-title="tool.oneone" title="1:1" data-i18n="tool.oneone">1:1</button>
       </div>
       <div id="findbox">
-        <select id="findType" title="搜索类型">
-          <option value="prov">地块</option>
-          <option value="state">state</option>
-          <option value="sr">战略区</option>
-          <option value="continent">大洲</option>
+        <select id="findType" data-i18n-title="find.type" title="搜索类型">
+          <option value="prov" data-i18n="find.prov">地块</option>
+          <option value="state" data-i18n="find.state">state</option>
+          <option value="sr" data-i18n="layers.sr">战略区</option>
+          <option value="continent" data-i18n="layers.continent">大洲</option>
         </select>
-        <input id="findQuery" placeholder="搜索…" spellcheck="false">
-        <button id="findGo">查找</button>
+        <input id="findQuery" data-i18n-ph="find.ph" placeholder="搜索…" spellcheck="false">
+        <button id="findGo" data-i18n="find.go">查找</button>
       </div>
-      <div id="tgtBox"><h4>细化目标 <button id="btnClearTgt" class="ghost" style="float:right;padding:0 6px;line-height:1" title="清除目标">×</button></h4><div id="tgtBody"></div></div>
-      <div id="legend"><h4>图例</h4><div id="legendBody"></div></div>
+      <div id="tgtBox"><h4><span data-i18n="tgt.title">细化目标</span> <button id="btnClearTgt" class="ghost" style="float:right;padding:0 6px;line-height:1" data-i18n-title="tgt.clear" title="清除目标">×</button></h4><div id="tgtBody"></div></div>
+      <div id="legend"><h4 data-i18n="legend.title">图例</h4><div id="legendBody"></div></div>
       <div id="tooltip"></div>
     </div>
     <div id="statusbar">
-      <span>视角 <b id="stZoom">–</b></span>
-      <span>光标 <b id="stPos">–</b></span>
-      <span>省份 <b id="stProv">–</b></span>
-      <span>已选 <b id="stSel">无</b></span>
-      <span>细化目标 <b id="stTargets">无</b></span>
-      <span class="tiny">快捷键 <kbd>F</kbd> 搜索 · <kbd>Ctrl</kbd>+<kbd>Z</kbd>/<kbd>Y</kbd> 撤销·重做 · <kbd>Esc</kbd> 清选</span>
+      <span><span data-i18n="st.zoom">视角</span> <b id="stZoom">–</b></span>
+      <span><span data-i18n="st.pos">光标</span> <b id="stPos">–</b></span>
+      <span><span data-i18n="st.prov">省份</span> <b id="stProv">–</b></span>
+      <span><span data-i18n="st.sel">已选</span> <b id="stSel">无</b></span>
+      <span><span data-i18n="st.targets">细化目标</span> <b id="stTargets">无</b></span>
+      <span class="tiny" data-i18n-html="st.shortcutsHtml">快捷键 <kbd>F</kbd> 搜索 · <kbd>Ctrl</kbd>+<kbd>Z</kbd>/<kbd>Y</kbd> 撤销·重做 · <kbd>Esc</kbd> 清选</span>
       <span style="margin-left:auto" id="stMsg"></span>
     </div>
   </main>
 
   <aside id="side">
     <nav class="tabs">
-      <button data-tab="map" class="active">地图</button>
-      <button data-tab="analyze">分析</button>
-      <button data-tab="refine">细化</button>
-      <button data-tab="audit">检查</button>
-      <button data-tab="edit">编辑</button>
-      <button data-tab="report">报告</button>
+      <button data-tab="map" class="active" data-i18n="tab.map">地图</button>
+      <button data-tab="analyze" data-i18n="tab.analyze">分析</button>
+      <button data-tab="refine" data-i18n="tab.refine">细化</button>
+      <button data-tab="audit" data-i18n="tab.audit">检查</button>
+      <button data-tab="edit" data-i18n="tab.edit">编辑</button>
+      <button data-tab="report" data-i18n="tab.report">报告</button>
     </nav>
     <div class="panes">
 
       <!-- 地图 -->
       <section class="pane active" data-pane="map">
-        <fieldset><legend>地图信息</legend>
+        <fieldset><legend data-i18n="map.info">地图信息</legend>
           <div id="mapInfo" class="tiny">尚未加载缓存。</div>
         </fieldset>
-        <fieldset><legend>数据来源 / 参考</legend>
+        <fieldset><legend data-i18n="map.src">数据来源 / 参考</legend>
           <div class="row">
-            <label>参考</label>
+            <label data-i18n="map.ref">参考</label>
             <select id="edRef" style="flex:1">
-              <option value="mod">mod 原文件</option>
-              <option value="output">output 输出</option>
+              <option value="mod" data-i18n="map.refMod">mod 原文件</option>
+              <option value="output" data-i18n="map.refOut">output 输出</option>
             </select>
           </div>
           <div class="row">
-            <button id="btnClearSel" class="ghost">清除选中</button>
+            <button id="btnClearSel" class="ghost" data-i18n="map.clearSel">清除选中</button>
           </div>
-          <p class="hint">地图上：滚轮缩放（以光标为中心），拖动平移，单击选中省份，悬停查看信息。右上角可搜索定位。</p>
+          <p class="hint" data-i18n="map.hint">地图上：滚轮缩放（以光标为中心），拖动平移，单击选中省份，悬停查看信息。右上角可搜索定位。</p>
         </fieldset>
-        <fieldset><legend>运行环境 / 依赖库</legend>
+        <fieldset><legend data-i18n="map.env">运行环境 / 依赖库</legend>
           <div id="depInfo" class="tiny">检查中…</div>
           <div class="row">
-            <select id="depMirror" style="flex:1" title="pip 下载源">
+            <select id="depMirror" style="flex:1" data-i18n-title="map.mirror" title="pip 下载源">
               <option value="">官方 PyPI (pypi.org)</option>
               <option value="https://pypi.tuna.tsinghua.edu.cn/simple">清华 TUNA</option>
               <option value="https://mirrors.aliyun.com/pypi/simple/">阿里云</option>
               <option value="https://mirrors.cloud.tencent.com/pypi/simple">腾讯云</option>
               <option value="https://pypi.mirrors.ustc.edu.cn/simple/">中科大 USTC</option>
             </select>
-            <button id="depInstall">一键安装缺少的库</button>
-            <button id="depRecheck" class="ghost">重新检测</button>
+            <button id="depInstall" data-i18n="map.install">一键安装缺少的库</button>
+            <button id="depRecheck" class="ghost" data-i18n="map.recheck">重新检测</button>
           </div>
         </fieldset>
-        <fieldset><legend>图例图层</legend>
+        <fieldset><legend data-i18n="map.legendLayers">图例图层</legend>
           <div class="row">
-            <button data-leg="sr" class="ghost">战略区图例</button>
-            <button data-leg="state" class="ghost">州图例</button>
-            <button data-leg="continent" class="ghost">大洲图例</button>
+            <button data-leg="sr" class="ghost" data-i18n="map.legSr">战略区图例</button>
+            <button data-leg="state" class="ghost" data-i18n="map.legState">州图例</button>
+            <button data-leg="continent" class="ghost" data-i18n="map.legCont">大洲图例</button>
           </div>
         </fieldset>
       </section>
@@ -119,16 +120,16 @@
       <!-- 分析 -->
       <section class="pane" data-pane="analyze">
         <div class="toolbar">
-          <button id="btnAnalyze" class="primary">① 分析（不写入）</button>
-          <button id="btnCancel1" class="ghost" disabled>取消</button>
-          <span id="anaSpinner" style="display:none"><span class="spin"></span> 运行中…</span>
+          <button id="btnAnalyze" class="primary" data-i18n="ana.run">① 分析（不写入）</button>
+          <button id="btnCancel1" class="ghost" disabled data-i18n="common.cancel">取消</button>
+          <span id="anaSpinner" style="display:none"><span class="spin"></span> <span data-i18n="ana.running">运行中…</span></span>
         </div>
         <div id="anaSummary" class="hint"></div>
         <div class="tblwrap"><table class="tbl" id="anaTable">
           <thead><tr>
-            <th data-k="prov_id">ID</th><th>色</th><th data-k="area" class="num">面积</th>
-            <th data-k="k" class="num">拆分</th><th data-k="type">类型</th>
-            <th data-k="continent_name">大洲</th><th data-k="state">state</th><th data-k="sr">战略区</th>
+            <th data-k="prov_id" data-i18n="th.id">ID</th><th data-i18n="th.color">色</th><th data-k="area" class="num" data-i18n="th.area">面积</th>
+            <th data-k="k" class="num" data-i18n="th.split">拆分</th><th data-k="type" data-i18n="th.type">类型</th>
+            <th data-k="continent_name" data-i18n="layers.continent">大洲</th><th data-k="state" data-i18n="find.state">state</th><th data-k="sr" data-i18n="layers.sr">战略区</th>
           </tr></thead><tbody></tbody>
         </table></div>
       </section>
@@ -136,31 +137,31 @@
       <!-- 细化 -->
       <section class="pane" data-pane="refine">
         <div class="toolbar">
-          <button id="btnRun" class="primary">② 开始细化（写出）</button>
-          <button id="btnCancel2" class="ghost" disabled>取消</button>
-          <button id="btnOpenOut" class="ghost">打开输出目录</button>
-          <span id="runSpinner" style="display:none"><span class="spin"></span> 运行中…</span>
+          <button id="btnRun" class="primary" data-i18n="run.start">② 开始细化（写出）</button>
+          <button id="btnCancel2" class="ghost" disabled data-i18n="common.cancel">取消</button>
+          <button id="btnOpenOut" class="ghost" data-i18n="run.openOut">打开输出目录</button>
+          <span id="runSpinner" style="display:none"><span class="spin"></span> <span data-i18n="ana.running">运行中…</span></span>
         </div>
-        <p class="hint">会把结果写到“输出目录”，默认不覆盖原 mod。</p>
-        <fieldset><legend>日志</legend><div id="log"></div></fieldset>
-        <fieldset><legend>预览图</legend>
-          <div id="previews" class="tiny">运行后显示 修改前 / 修改后。</div>
+        <p class="hint" data-i18n="run.hint">会把结果写到“输出目录”，默认不覆盖原 mod。</p>
+        <fieldset><legend data-i18n="run.log">日志</legend><div id="log"></div></fieldset>
+        <fieldset><legend data-i18n="run.preview">预览图</legend>
+          <div id="previews" class="tiny">—</div>
         </fieldset>
-        <fieldset><legend>结果摘要</legend><div id="runSummary" class="tiny">—</div></fieldset>
+        <fieldset><legend data-i18n="run.summary">结果摘要</legend><div id="runSummary" class="tiny">—</div></fieldset>
       </section>
 
       <!-- 检查 -->
       <section class="pane" data-pane="audit">
         <div class="toolbar">
-          <button id="btnAudit" class="primary">③ 完整性检查</button>
-          <span id="audSpinner" style="display:none"><span class="spin"></span> 检查中…</span>
+          <button id="btnAudit" class="primary" data-i18n="aud.run">③ 完整性检查</button>
+          <span id="audSpinner" style="display:none"><span class="spin"></span> <span data-i18n="aud.checking">检查中…</span></span>
         </div>
         <div class="toolbar">
-          <button id="btnRepair" class="primary">🔧 修复（不细化）</button>
-          <span id="repSpinner" style="display:none"><span class="spin"></span> 修复中…</span>
+          <button id="btnRepair" class="primary" data-i18n="aud.repair">🔧 修复（不细化）</button>
+          <span id="repSpinner" style="display:none"><span class="spin"></span> <span data-i18n="aud.repairing">修复中…</span></span>
         </div>
-        <p class="hint">修复会把 战略区/州/铁路/海峡/运河 的修正写入“输出目录”，<b>不拆分任何地块</b>。修复完成后会自动重跑检查。</p>
-        <fieldset><legend>修复日志</legend><div id="repairLog" class="tiny" style="max-height:150px;overflow:auto;white-space:pre-wrap">—</div></fieldset>
+        <p class="hint" data-i18n-html="aud.hint">修复会把 战略区/州/铁路/海峡/运河 的修正写入“输出目录”，<b>不拆分任何地块</b>。修复完成后会自动重跑检查。</p>
+        <fieldset><legend data-i18n="aud.repairLog">修复日志</legend><div id="repairLog" class="tiny" style="max-height:150px;overflow:auto;white-space:pre-wrap">—</div></fieldset>
         <div id="auditBody" class="tiny">检查战略区/州归属、铁路断连、海峡运河、孤立碎块、十字交叉。</div>
       </section>
 
@@ -168,74 +169,74 @@
       <section class="pane" data-pane="edit">
         <div class="toolbar">
           <label class="check"><input type="checkbox" id="editMode">编辑模式</label>
-          <label>图层</label>
+          <label data-i18n="layers.title">图层</label>
           <select id="edLayer">
-            <option value="state">州(state)：底色=州，边框=地块</option>
-            <option value="sr">战略区：底色=战略区，边框=州</option>
-            <option value="continent">大洲：底色=大洲，边框=战略区</option>
-            <option value="prov">地块(province)：合并/删除</option>
-            <option value="rail">铁路 / 补给</option>
-            <option value="terrain">地块地形</option>
+            <option value="state" data-i18n="layer.state">州(state)：底色=州，边框=地块</option>
+            <option value="sr" data-i18n="layer.sr">战略区：底色=战略区，边框=州</option>
+            <option value="continent" data-i18n="layer.continent">大洲：底色=大洲，边框=战略区</option>
+            <option value="prov" data-i18n="layer.prov">地块(province)：合并/删除</option>
+            <option value="rail" data-i18n="layer.rail">铁路 / 补给</option>
+            <option value="terrain" data-i18n="layer.terrain">地块地形</option>
           </select>
         </div>
-        <fieldset><legend>操作方式</legend>
+        <fieldset><legend data-i18n="edit.opTitle">操作方式</legend>
           <div id="edTarget" class="tiny" style="color:var(--accent)">当前目标：未选择</div>
           <div id="edHint" class="hint">按当前图层给出操作提示。</div>
-          <p class="hint">点击一个地块＝选它所在的<b>州/战略区/大洲</b>为目标（整片会描边）；<b>Shift+点击</b>＝把该地块加入/移出目标；空地块 Shift 点击会直接加入。州层只能放陆地/湖泊。</p>
+          <p class="hint" data-i18n-html="edit.hintGeneral">点击一个地块＝选它所在的<b>州/战略区/大洲</b>为目标（整片会描边）；<b>Shift+点击</b>＝把该地块加入/移出目标；空地块 Shift 点击会直接加入。州层只能放陆地/湖泊。</p>
         </fieldset>
-        <fieldset><legend>当前选中 / 地块信息</legend>
-          <div id="edSel" class="tiny">未选中</div>
+        <fieldset><legend data-i18n="edit.selTitle">当前选中 / 地块信息</legend>
+          <div id="edSel" class="tiny">—</div>
           <div id="edInfo" class="tiny"></div>
-          <div class="row"><button id="edClearSel" class="ghost">清空选择</button></div>
+          <div class="row"><button id="edClearSel" class="ghost" data-i18n="edit.clearSel">清空选择</button></div>
         </fieldset>
-        <fieldset id="fsTerrain" style="display:none"><legend>地块地形（读取 terrain.bmp）</legend>
-          <div id="terCur" class="tiny" style="color:var(--accent)">未选中地块</div>
-          <div class="row"><label>地形</label><select id="terSel" style="flex:1"></select><button id="terSave">保存地形</button></div>
-          <div class="row"><button id="terAuto" class="primary">用 terrain.bmp 自动生成（全部陆地）</button></div>
-          <div class="row"><button id="terExport" class="ghost">导出 terrain.bmp（由 definition.csv 生成）</button></div>
+        <fieldset id="fsTerrain" style="display:none"><legend data-i18n="terrain.title">地块地形（读取 terrain.bmp）</legend>
+          <div id="terCur" class="tiny" style="color:var(--accent)">—</div>
+          <div class="row"><label data-i18n="layers.terrain">地形</label><select id="terSel" style="flex:1"></select><button id="terSave" data-i18n="terrain.save">保存地形</button></div>
+          <div class="row"><button id="terAuto" class="primary" data-i18n="terrain.auto">用 terrain.bmp 自动生成（全部陆地）</button></div>
+          <div class="row"><button id="terExport" class="ghost" data-i18n="terrain.export">导出 terrain.bmp（由 definition.csv 生成）</button></div>
           <div id="terInfo" class="tiny"></div>
         </fieldset>
-        <fieldset id="fsProv" style="display:none"><legend>地块工具（省份层）</legend>
-          <div class="row"><button id="edMerge">合并（第一个为目标）</button><button id="edDelete">删除（并入最大邻居）</button></div>
+        <fieldset id="fsProv" style="display:none"><legend data-i18n="prov.title">地块工具（省份层）</legend>
+          <div class="row"><button id="edMerge" data-i18n="prov.merge">合并（第一个为目标）</button><button id="edDelete" data-i18n="prov.delete">删除（并入最大邻居）</button></div>
         </fieldset>
-        <fieldset id="fsState"><legend>编辑州（选中州后显示其数据，可修改并保存）</legend>
-          <div id="nsCur" class="tiny" style="color:var(--accent)">未选择州</div>
-          <div class="row"><label>当前州ID</label><input id="nsEditId" readonly style="width:120px"></div>
+        <fieldset id="fsState"><legend data-i18n="state.title">编辑州（选中州后显示其数据，可修改并保存）</legend>
+          <div id="nsCur" class="tiny" style="color:var(--accent)">—</div>
+          <div class="row"><label data-i18n="state.id">当前州ID</label><input id="nsEditId" readonly style="width:120px"></div>
           <div class="grid">
-            <div class="f"><label>归属国 owner</label><input id="nsOwner"></div>
-            <div class="f"><label>人数 manpower</label><input id="nsManpower" type="number" value="100000"></div>
-            <div class="f"><label>州类别 category</label><input id="nsCategory" value="rural"></div>
-            <div class="f"><label>基建</label><input id="nsInfra" type="number" value="0"></div>
-            <div class="f"><label>民工</label><input id="nsInd" type="number" value="0"></div>
-            <div class="f"><label>军工厂</label><input id="nsArms" type="number" value="0"></div>
-            <div class="f"><label>船坞</label><input id="nsDock" type="number" value="0"></div>
+            <div class="f"><label data-i18n="state.owner">归属国 owner</label><input id="nsOwner"></div>
+            <div class="f"><label data-i18n="state.manpower">人数 manpower</label><input id="nsManpower" type="number" value="100000"></div>
+            <div class="f"><label data-i18n="state.category">州类别 category</label><input id="nsCategory" value="rural"></div>
+            <div class="f"><label data-i18n="state.infra">基建</label><input id="nsInfra" type="number" value="0"></div>
+            <div class="f"><label data-i18n="state.ind">民工</label><input id="nsInd" type="number" value="0"></div>
+            <div class="f"><label data-i18n="state.arms">军工厂</label><input id="nsArms" type="number" value="0"></div>
+            <div class="f"><label data-i18n="state.dock">船坞</label><input id="nsDock" type="number" value="0"></div>
           </div>
-          <div class="row"><label>其它建筑</label><select id="nsBuilding">/Datalist</select><input id="nsBuildingLv" type="number" value="1" style="width:64px"><button id="nsAddBuilding" class="ghost">添加</button></div>
+          <div class="row"><label data-i18n="state.otherBuildings">其它建筑</label><select id="nsBuilding">/Datalist</select><input id="nsBuildingLv" type="number" value="1" style="width:64px"><button id="nsAddBuilding" class="ghost" data-i18n="state.add">添加</button></div>
           <div id="nsBuildings" class="tiny">—</div>
-          <div class="row"><button id="nsSave" class="primary">保存州数据</button><button id="edNewStateCreate" class="ghost">用选中地块新建州</button></div>
+          <div class="row"><button id="nsSave" class="primary" data-i18n="state.save">保存州数据</button><button id="edNewStateCreate" class="ghost" data-i18n="state.create">用选中地块新建州</button></div>
         </fieldset>
-        <fieldset id="fsSr" style="display:none"><legend>战略区数据（选中战略区后可改）</legend>
+        <fieldset id="fsSr" style="display:none"><legend data-i18n="sr.title">战略区数据（选中战略区后可改）</legend>
           <div id="srCur" class="tiny" style="color:var(--accent)">未选择战略区</div>
-          <div class="row"><label>名称</label><input id="srName" style="flex:1"></div>
-          <div class="f full"><label>weather 内容（原样文本）</label><textarea id="srWeather" rows="6" style="width:100%"></textarea></div>
-          <div class="row"><button id="srSave" class="primary">保存战略区数据</button><span id="srProv" class="tiny"></span></div>
+          <div class="row"><label data-i18n="sr.name">名称</label><input id="srName" style="flex:1"></div>
+          <div class="f full"><label data-i18n="sr.weather">weather 内容（原样文本）</label><textarea id="srWeather" rows="6" style="width:100%"></textarea></div>
+          <div class="row"><button id="srSave" class="primary" data-i18n="sr.save">保存战略区数据</button><span id="srProv" class="tiny"></span></div>
         </fieldset>
-        <fieldset id="fsRail" style="display:none"><legend>铁路 / 补给（点击地图上的铁路线选中）</legend>
-          <div id="railInfo" class="tiny" style="color:var(--accent)">未选中铁路</div>
-          <div class="row"><label>等级</label><input id="railLevel" type="number" min="1" max="5" value="3" style="width:70px"><button id="railLevelSave">保存等级</button><button id="railDel" class="ghost">删除铁路</button></div>
-          <div class="row"><label>新建等级</label><input id="railNewLevel" type="number" min="1" max="5" value="3" style="width:70px"><button id="railClearSel" class="ghost">取消选中</button></div>
+        <fieldset id="fsRail" style="display:none"><legend data-i18n="rail.title">铁路 / 补给（点击地图上的铁路线选中）</legend>
+          <div id="railInfo" class="tiny" style="color:var(--accent)">—</div>
+          <div class="row"><label data-i18n="rail.level">等级</label><input id="railLevel" type="number" min="1" max="5" value="3" style="width:70px"><button id="railLevelSave" data-i18n="rail.saveLevel">保存等级</button><button id="railDel" class="ghost" data-i18n="rail.del">删除铁路</button></div>
+          <div class="row"><label data-i18n="rail.newLevel">新建等级</label><input id="railNewLevel" type="number" min="1" max="5" value="3" style="width:70px"><button id="railClearSel" class="ghost" data-i18n="rail.clearSel">取消选中</button></div>
           <div class="row"><label class="check"><input type="checkbox" id="adjStrait">海峡</label><label class="check"><input type="checkbox" id="adjCanal">运河</label><label class="check"><input type="checkbox" id="adjImpass">不可通行屏障</label><label class="check"><input type="checkbox" id="adjFar">远距离连线</label></div>
           <div id="railStat" class="tiny"></div>
         </fieldset>
-        <fieldset id="fsNewSr" style="display:none"><legend>新建战略区</legend>
-          <div class="row"><input id="nsrId" type="number" placeholder="战略区ID" style="flex:1"><button id="edNewSrCreate" class="primary">用当前选中地块 新建战略区</button></div>
+        <fieldset id="fsNewSr" style="display:none"><legend data-i18n="sr.newTitle">新建战略区</legend>
+          <div class="row"><input id="nsrId" type="number" data-i18n-ph="sr.newIdPh" placeholder="战略区ID" style="flex:1"><button id="edNewSrCreate" class="primary" data-i18n="sr.create">用当前选中地块 新建战略区</button></div>
         </fieldset>
-        <fieldset><legend>下一个可用 ID（按当前数据实时核对）</legend>
+        <fieldset><legend data-i18n="ids.title">下一个可用 ID（按当前数据实时核对）</legend>
           <div id="nextIdInfo" class="tiny">—</div>
-          <div class="row"><button id="btnCheckIds" class="ghost">重新核对</button></div>
+          <div class="row"><button id="btnCheckIds" class="ghost" data-i18n="ids.recheck">重新核对</button></div>
         </fieldset>
-        <fieldset><legend>撤销 / 导出</legend>
-          <div class="row"><button id="edUndo">撤销</button><button id="edRedo">重做</button><button id="edReset">重置</button><button id="edExport" class="primary">导出到输出目录</button></div>
+        <fieldset><legend data-i18n="undo.title">撤销 / 导出</legend>
+          <div class="row"><button id="edUndo" data-i18n="undo.undo">撤销</button><button id="edRedo" data-i18n="undo.redo">重做</button><button id="edReset" data-i18n="undo.reset">重置</button><button id="edExport" class="primary" data-i18n="undo.export">导出到输出目录</button></div>
           <div id="edOps" class="tiny" style="max-height:140px;overflow:auto;white-space:pre-wrap">—</div>
         </fieldset>
       </section>
@@ -247,7 +248,7 @@
           <button data-rep="txt">report.txt</button>
           <button data-rep="changed">changed_files.txt</button>
         </div>
-        <div id="reportBody" class="tiny">选择一份报告查看。</div>
+        <div id="reportBody" class="tiny"></div>
       </section>
 
       <!-- 参数 (共享, 显示在相关标签底部) -->

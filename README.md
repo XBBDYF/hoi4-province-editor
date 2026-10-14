@@ -221,3 +221,12 @@ GUI 有「原版目录」输入框 +「states/战略区 与原版合并」复选
 [![爱发电](https://img.shields.io/badge/爱发电-赞助支持-946ce6?style=for-the-badge)](https://afdian.com/a/hoi4-province-editor)
 
 你的支持会用于项目的持续维护和更新。
+---
+
+## 多语言 (i18n)
+
+界面文案集中在 `webui/i18n/*.yml`（YAML）。顶栏有**语言下拉框**，选择后立即生效并记在浏览器里。
+
+1. 现有语言：`zh-CN.yml`（简体中文，源语言）、`en-US.yml`（English）。
+2. 新增语言：复制 `zh-CN.yml` 为 `xx-XX.yml` → 翻译**值**（键名别动）→ 在 `webui/i18n/locales.yml` 加一条 `code/label/file` → 刷新页面即可。
+3. 约定（`data-i18n` / `t()` / `tfmt()` / `/api/i18n`）见 [webui/i18n/README.md](webui/i18n/README.md)。

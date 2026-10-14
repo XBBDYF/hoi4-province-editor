@@ -56,7 +56,7 @@ def parse_parts(s):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("HOI4 地块细化工具  |  Project_IRIS")
+        self.title("HOI4 地块细化工具  |  GUI界面")
         self.geometry("1180x820")
         self.q = queue.Queue()
         self.busy = False

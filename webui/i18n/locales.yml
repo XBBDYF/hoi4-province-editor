@@ -1,0 +1,31 @@
+# 可用语言列表(新增语言: 加一份 xx-XX.yml, 然后在这里追加一条)
+default: zh-CN
+locales:
+  - code: zh-CN
+    label: 简体中文
+    file: zh-CN.yml
+  - code: en-US
+    label: English
+    file: en-US.yml
+  - code: ja-JP
+    label: 日本語
+    file: ja-JP.yml
+  - code: ko-KR
+    label: 한국어
+    file: ko-KR.yml
+  - code: ru-RU
+    label: Русский
+    file: ru-RU.yml
+  - code: de-DE
+    label: Deutsch
+    file: de-DE.yml
+  - code: fr-FR
+    label: Français
+    file: fr-FR.yml
+  - code: pl-PL
+    label: Polski
+    file: pl-PL.yml
+  - code: ar-SA
+    label: العربية
+    file: ar-SA.yml
+    dir: rtl

@@ -84,6 +84,7 @@ webui/
 | --- | --- | --- |
 | GET | `/api/state` | 项目状态（mod/输出/缓存是否存在、省份数） |
 | GET | `/api/defaults` | 默认路径 |
+| GET | `/api/i18n?lang=xx-XX` | 多语言词典（YAML: `webui/i18n/*.yml`） |
 | POST | `/api/cache/build` | 重建地图缓存（后台任务） |
 | POST | `/api/analyze` | 只读分析 |
 | POST | `/api/run` | 执行细化并写出 |

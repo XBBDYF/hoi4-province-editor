@@ -93,9 +93,9 @@ function uiDialog(msg, opts) {
   const msgEl = document.getElementById('uiModalMsg');
   const okBtn = document.getElementById('uiModalOk');
   const cancelBtn = document.getElementById('uiModalCancel');
-  msgEl.textContent = String(msg == null ? '' : msg);
-  okBtn.textContent = opts.okText || '确定';
-  cancelBtn.textContent = opts.cancelText || '取消';
+  msgEl.textContent = tp(String(msg == null ? '' : msg));
+  okBtn.textContent = tp(opts.okText || '确定');
+  cancelBtn.textContent = tp(opts.cancelText || '取消');
   cancelBtn.style.display = cancelable ? '' : 'none';
   el.classList.toggle('danger', !!opts.danger);
   el.classList.add('on');
@@ -140,24 +140,24 @@ function _progPctFor(s) {
 let _progBeat = null, _progT0 = 0, _progLast = '准备中…';
 function progShow(title) {
   const el = document.getElementById('bigProg'); if (!el) return;
-  const ti = document.getElementById('bpTitle'); if (ti) ti.textContent = title || '处理中…';
-  const tx = document.getElementById('bpTxt'); if (tx) tx.textContent = '准备中…';
+  const ti = document.getElementById('bpTitle'); if (ti) ti.textContent = tp(title || '处理中…');
+  const tx = document.getElementById('bpTxt'); if (tx) tx.textContent = tp('准备中…');
   const b = document.getElementById('bpBar'); if (b) { b.parentElement.classList.add('indet'); b.style.width = '0%'; }
   el.classList.add('on');
-  _progT0 = Date.now(); _progLast = '准备中…'; _progPct = 0;
+  _progT0 = Date.now(); _progLast = tp('准备中…'); _progPct = 0;
   if (_progBeat) clearInterval(_progBeat);
   _progBeat = setInterval(() => {            // 每秒显示已等待时间, 避免"没动"的错觉
     const box = document.getElementById('bigProg');
     if (!box || !box.classList.contains('on')) return;
     const t2 = document.getElementById('bpTxt');
-    if (t2) t2.textContent = _progLast + '　（已等待 ' + Math.round((Date.now() - _progT0) / 1000) + 's）';
+    if (t2) t2.textContent = _progLast + tfmt('prog.waiting', { s: Math.round((Date.now() - _progT0) / 1000) }, '　（已等待 {s}s）');
   }, 1000);
 }
 function progStep(msg) {
   const el = document.getElementById('bigProg'); if (!el || !el.classList.contains('on')) return;
   const s0 = String(msg || '');
-  _progLast = s0;
-  const tx = document.getElementById('bpTxt'); if (tx) tx.textContent = s0;
+  _progLast = tp(s0);                       // 显示用译文; 下面的阶段判定仍用原文 s0
+  const tx = document.getElementById('bpTxt'); if (tx) tx.textContent = _progLast;
   const b = document.getElementById('bpBar');
   let pct = _progPctFor(s0);
   if (pct == null) { const mm = s0.match(/(\d{1,3}(?:\.\d+)?)\s*%/); if (mm) pct = Math.max(1, Math.min(100, Math.round(+mm[1]))); }
@@ -173,8 +173,8 @@ function progHide() {
   const el = document.getElementById('bigProg'); if (el) el.classList.remove('on');
 }
 function progTitleFor(url) {
-  for (const [u, ttl] of PROG_TITLE) { if (String(url).indexOf(u) >= 0) return ttl; }
-  return '处理中…';
+  for (const [u, ttl] of PROG_TITLE) { if (String(url).indexOf(u) >= 0) return tp(ttl); }
+  return tp('处理中…');
 }
 function runJob(url, body, { onLog, onDone, onErr } = {}) {
   const _fail = (m) => { progHide(); onErr && onErr(m); };
@@ -196,7 +196,7 @@ function runJob(url, body, { onLog, onDone, onErr } = {}) {
     es.onmessage = (ev) => {
       _bump();
       let d; try { d = JSON.parse(ev.data); } catch { return; }
-      if (d.type === 'log') { onLog && onLog(d.msg); progStep(d.msg); }
+      if (d.type === 'log') { onLog && onLog(tp(d.msg)); progStep(d.msg); }
       else if (d.type === 'ping') { /* 心跳: 只刷新看门狗 */ }
       else if (d.type === 'done') {
         if (wd) { clearTimeout(wd); wd = null; }
@@ -211,7 +211,7 @@ function runJob(url, body, { onLog, onDone, onErr } = {}) {
     };
     return { es, cancel: () => fetch('/api/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task }) }) };
   }).catch(e => {
-    _fail('无法连接到服务（' + ((e && e.message) || e) + '）。\n请确认服务正在运行：双击项目根目录的 ★一键启动Web编辑器.bat');
+    _fail(tpf('无法连接到服务（{e}）。', { e: ((e && e.message) || e) }) + '\n' + tp('请确认服务正在运行：双击项目根目录的 ★一键启动Web编辑器.bat'));
     return null;
   });
 }
@@ -223,7 +223,7 @@ async function serverAlive() {
 }
 async function needServer() {
   if (await serverAlive()) return true;
-  await uiAlert('服务没有响应：Web 服务可能未启动或已停止。\n请双击项目根目录的 ★一键启动Web编辑器.bat 重新启动后再试。');
+  await uiAlert(t('dialog.noServer'));
   return false;
 }
 
@@ -276,7 +276,7 @@ function buildCfgForm() {
   wrap.id = 'cfgForm';
   for (const [title, fields] of CFG_SCHEMA) {
     const fs = document.createElement('fieldset');
-    fs.innerHTML = `<legend>${title}</legend>`;
+    fs.innerHTML = `<legend>${tp(title)}</legend>`;
     const grid = document.createElement('div');
     grid.className = 'grid';
     for (const [key, kind, label, dflt] of fields) {
@@ -284,12 +284,12 @@ function buildCfgForm() {
       f.className = 'f' + (kind === 'text' ? ' full' : '');
       if (kind === 'check') {
         f.className = 'full check';
-        f.innerHTML = `<input type="checkbox" id="cfg_${key}"><label for="cfg_${key}">${label}</label>`;
+        f.innerHTML = `<input type="checkbox" id="cfg_${key}"><label for="cfg_${key}">${tp(label)}</label>`;
       } else if (kind === 'select') {
-        const opts = dflt.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
-        f.innerHTML = `<label>${label}</label><select id="cfg_${key}">${opts}</select>`;
+        const opts = dflt.map(([v, t]) => `<option value="${v}">${tp(t)}</option>`).join('');
+        f.innerHTML = `<label>${tp(label)}</label><select id="cfg_${key}">${opts}</select>`;
       } else {
-        f.innerHTML = `<label>${label}</label><input id="cfg_${key}" type="${kind === 'number' ? 'number' : 'text'}" ${kind === 'number' ? 'step="any"' : ''}>`;
+        f.innerHTML = `<label>${tp(label)}</label><input id="cfg_${key}" type="${kind === 'number' ? 'number' : 'text'}" ${kind === 'number' ? 'step="any"' : ''}>`;
       }
       grid.appendChild(f);
     }
@@ -345,16 +345,16 @@ const MapView = {
   canvas: null, ctx: null, W: 0, H: 0, cam: { s: 1, x: 0, y: 0 },
   imgs: {}, pid: null, pidW: 0, pidH: 0, hl: null, tgt: null, tgtIds: null, layerMaps: {}, raf: 0, inited: false,
   layers: [
-    { key: 'layers-base', name: '地形', img: 'base', vis: true, op: 1 },
-    { key: 'layers-prov', name: '省份', img: 'prov', vis: false, op: 0.85 },
-    { key: 'layers-cont', name: '大洲', img: 'cont', vis: false, op: 0.6 },
-    { key: 'layers-sr', name: '战略区', img: 'sr', vis: false, op: 0.6 },
-    { key: 'layers-state', name: '州', img: 'state', vis: false, op: 0.6 },
-    { key: 'layers-edges', name: '边界', img: 'edges', vis: true, op: 0.85 },
-    { key: 'layers-tgt', name: '细化目标', img: 'tgt', vis: true, op: 1 },
-    { key: 'layers-rail', name: '铁路', img: 'rail', vis: false, op: 1 },
-    { key: 'layers-rivers', name: '河流', img: 'rivers', vis: false, op: 0.9 },
-    { key: 'layers-links', name: '海峡/运河', img: 'links', vis: false, op: 1 },
+    { key: 'layers-base', name: '地形', nameKey: 'layers.terrain', img: 'base', vis: true, op: 1 },
+    { key: 'layers-prov', name: '省份', nameKey: 'layers.prov', img: 'prov', vis: false, op: 0.85 },
+    { key: 'layers-cont', name: '大洲', nameKey: 'layers.continent', img: 'cont', vis: false, op: 0.6 },
+    { key: 'layers-sr', name: '战略区', nameKey: 'layers.sr', img: 'sr', vis: false, op: 0.6 },
+    { key: 'layers-state', name: '州', nameKey: 'layers.state', img: 'state', vis: false, op: 0.6 },
+    { key: 'layers-edges', name: '边界', nameKey: 'layers.edges', img: 'edges', vis: true, op: 0.85 },
+    { key: 'layers-tgt', name: '细化目标', nameKey: 'tgt.title', img: 'tgt', vis: true, op: 1 },
+    { key: 'layers-rail', name: '铁路', nameKey: 'layers.rail', img: 'rail', vis: false, op: 1 },
+    { key: 'layers-rivers', name: '河流', nameKey: 'layers.rivers', img: 'rivers', vis: false, op: 0.9 },
+    { key: 'layers-links', name: '海峡/运河', nameKey: 'layers.links', img: 'links', vis: false, op: 1 },
   ],
 };
 
@@ -415,8 +415,9 @@ function buildLayerControls() {
   for (const L of MapView.layers) {
     const row = document.createElement('div');
     row.className = 'lrow';
-    row.innerHTML = `<input type="checkbox" ${L.vis ? 'checked' : ''}>
-      <label>${L.name}</label>
+    const _nm = t(L.nameKey, L.name);
+  row.innerHTML = `<input type="checkbox" ${L.vis ? 'checked' : ''}>
+      <label>${_nm}</label>
       <input type="range" min="0" max="100" value="${Math.round(L.op * 100)}">
       <span class="pct">${Math.round(L.op * 100)}</span>`;
     const [cb, rng] = [row.querySelector('input[type=checkbox]'), row.querySelector('input[type=range]')];
@@ -671,7 +672,7 @@ function updateHover(w, sx, sy) {
   updStatus('stProv', '#' + id);
   const info = App.idx && App.idx[String(id)];
   tip.style.display = 'block';
-  tip.innerHTML = tooltipHTML(id, info);
+  tip.innerHTML = tp(tooltipHTML(id, info));
   const area = $('#maparea').getBoundingClientRect();
   let tx = sx - area.left + 14, ty = sy - area.top + 14;
   if (tx + 260 > area.width) tx = sx - area.left - 260;
@@ -701,7 +702,7 @@ function tooltipHTML(id, info) {
 
 function selectProvince(id) {
   App.sel = id ? Number(id) : null;
-  $('#stSel').textContent = App.sel ? ('#' + App.sel) : '无';
+  $('#stSel').textContent = tp(App.sel ? ('#' + App.sel) : '无');
   buildHighlight(App.sel);
   requestDraw();
 }
@@ -773,10 +774,10 @@ function setTargets(rows) {
       $$('#tgtBody .lg').forEach(el => el.onclick = () => locateProvince(Number(el.dataset.id)));
       box.style.display = 'block';
     } else {
-      body.innerHTML = '<div class="tiny">无</div>';
+      body.innerHTML = '<div class="tiny">' + tp('无') + '</div>';
     }
   }
-  const chip = $('#stTargets'); if (chip) chip.textContent = ids.size ? (ids.size + ' 个') : '无';
+  const chip = $('#stTargets'); if (chip) chip.textContent = ids.size ? tp('已选 {n} 个').split('{n}').join(String(ids.size)) : tp('无');
   if (ids.size) setLayer('tgt', true);
   requestDraw();
 }
@@ -784,7 +785,7 @@ function setTargets(rows) {
 function clearTargets(silent) {
   MapView.tgt = null; MapView.tgtIds = null;
   const box = $('#tgtBox'); if (box) box.style.display = 'none';
-  const chip = $('#stTargets'); if (chip) chip.textContent = '无';
+  const chip = $('#stTargets'); if (chip) chip.textContent = tp('无');
   if (!silent) setMsg('已清除细化目标');
   requestDraw();
 }
@@ -891,7 +892,7 @@ function doFind() {
   else if (type === 'state')   hits = rows.filter(r => num != null ? _regionNum(r.state) === num : String(r.state || '').toLowerCase().indexOf(ql) >= 0);
   else if (type === 'sr')      hits = rows.filter(r => num != null ? _regionNum(r.sr) === num : String(r.sr || '').toLowerCase().indexOf(ql) >= 0);
   else                         hits = rows.filter(r => num != null ? Number(r.continent) === num : contName(r).toLowerCase().indexOf(ql) >= 0);
-  if (!hits.length) { setMsg('未找到匹配：' + q + '（' + (FIND_CN[type] || type) + '，按编号精确匹配）'); buildESel([]); return; }
+  if (!hits.length) { setMsg(tpf('未找到匹配：{q}（{t}，按编号精确匹配）', { q: q, t: (FIND_CN[type] || type) })); buildESel([]); return; }
   hits.sort((a, b) => a.id - b.id);
   const ids = hits.map(r => r.id);
   App.findIds = ids;
@@ -899,7 +900,7 @@ function doFind() {
   fitToIds(ids);             // 缩放到命中范围
   App.sel = ids[0];
   edSelInfo && edSelInfo();
-  setMsg('匹配 ' + hits.length + ' 个' + (FIND_CN[type] || '') + '（编号 ' + q + '），已全部标出' + (hits.length > 1 ? '并缩放到范围' : ''));
+  setMsg(tpf('匹配 {n} 个{t}（编号 {q}），已全部标出{z}', { n: hits.length, t: (FIND_CN[type] || ''), q: q, z: (hits.length > 1 ? '并缩放到范围' : '') }));
 }
 function showLegend(kind) {
   const names = (App.regions && App.regions[kind]) || [];
@@ -907,7 +908,7 @@ function showLegend(kind) {
   const body = $('#legendBody');
   body.innerHTML = names.map((n, i) =>
     `<div class="lg"><span class="swatch" style="background:${rgbStr(p[i])}"></span><span>${n}</span></div>`).join('')
-    || '<div class="tiny">无数据</div>';
+    || ('<div class="tiny">' + tp('无数据') + '</div>');
   $('#legend').style.display = 'block';
   setLayer(kind, true);
 }
@@ -927,27 +928,27 @@ function editPost(url, body) {
   }).then(r => r.json());
 }
 function opText(o) {
-  if (o.kind === 'merge') return `合并: #${o.from.join(',')} → #${o.into}`;
+  if (o.kind === 'merge') return tpf('合并: #{a} → #{b}', { a: o.from.join(','), b: o.into });
   if (o.kind === 'mem') {
     const n = (o.pids && o.pids.length) || 1;
-    return `${o.level === 'state' ? '州' : '战略区'}: ${n > 1 ? (n + ' 块') : ('#' + o.pid)} ${o.op === 'add' ? '加入' : '移出'} ${o.file}`;
+    return tpf('{lvl}: {cnt} {op} {file}', { lvl: (o.level === 'state' ? '州' : '战略区'), cnt: (n > 1 ? tpf('{n} 块', { n: n }) : ('#' + o.pid)), op: (o.op === 'add' ? '加入' : '移出'), file: o.file });
   }
-  if (o.kind === 'continent') return `大洲: #${o.pid} → ${o.value}`;
-  if (o.kind === 'terrain') return `地形: #${o.pid} → ${o.value}`;
-  if (o.kind === 'new_state') return `新建州: ${o.file}`;
+  if (o.kind === 'continent') return tpf('大洲: #{a} → {b}', { a: o.pid, b: o.value });
+  if (o.kind === 'terrain') return tpf('地形: #{a} → {b}', { a: o.pid, b: o.value });
+  if (o.kind === 'new_state') return tpf('新建州: {file}', { file: o.file });
   return o.kind;
 }
 function showEditOps(status) {
   App.editOps = status;
   const el = $('#edOps'); if (!el) return;
   const ops = (status && status.ops) || [];
-  el.textContent = ops.length ? ops.map((o, i) => `${i + 1}. ${opText(o)}`).join('\n') : '（暂无编辑）';
+  el.textContent = tp(ops.length ? ops.map((o, i) => `${i + 1}. ${opText(o)}`).join('\n') : '（暂无编辑）');
 }
 function renderEditSel() {
   const el = $('#edSel'); if (!el) return;
-  el.innerHTML = App.editSel.length
+  el.innerHTML = tp(App.editSel.length
     ? App.editSel.map((id, i) => `<span class="chip">${i === 0 ? '★' : ''}#${id}</span>`).join(' ')
-    : '未选中（编辑模式下点击选择，Shift 加选）';
+    : '未选中（编辑模式下点击选择，Shift 加选）');
 }
 function editToggleSelect(id, additive) {
   id = Number(id); if (!id) return;
@@ -1026,31 +1027,31 @@ async function editRefresh() {
     else setMsg('编辑状态读取失败: ' + r.error);
   } catch (e) { setMsg('编辑状态读取失败: ' + e.message); }
 }
-function applyTheme(t) {
-  const light = (t === 'light');
+function applyTheme(theme) {
+  const light = (theme === 'light');
   document.documentElement.setAttribute('data-theme', light ? 'light' : 'dark');
   try { localStorage.setItem('hoi4-theme', light ? 'light' : 'dark'); } catch (e) { }
   const b = document.getElementById('themeToggle');
-  if (b) b.textContent = light ? '暗色主题' : '浅色主题';
+  if (b) b.textContent = t(light ? 'top.theme.dark' : 'top.theme.light');
 }
 function toggleTheme() {
   const cur = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
   applyTheme(cur === 'light' ? 'dark' : 'light');
-  if (typeof setMsg === 'function') setMsg('已切换主题：' + (cur === 'light' ? '暗色' : '浅色'));
+  if (typeof setMsg === 'function') setMsg(tfmt('msg.themeSwitched', { v: t(cur === 'light' ? 'top.theme.dark' : 'top.theme.light') }));
 }
 function initTheme() {
-  let t = 'dark';
-  try { t = localStorage.getItem('hoi4-theme') || 'dark'; } catch (e) { }
-  applyTheme(t);
+  let th = 'dark';
+  try { th = localStorage.getItem('hoi4-theme') || 'dark'; } catch (e) { }
+  applyTheme(th);
   const b = document.getElementById('themeToggle');
   if (b) b.onclick = (e) => { if (e) e.__flx = true; toggleTheme(); };
 }
 /* 兜底: 即使上面的直接绑定因故没生效, 这两个按钮也能响应; e.__flx 防止重复触发 */
 document.addEventListener('click', (e) => {
-  const t = (e.target && e.target.closest) ? e.target.closest('#themeToggle,#btnCache') : null;
-  if (!t || e.__flx) return;
-  if (t.id === 'themeToggle') toggleTheme();
-  else if (t.id === 'btnCache' && !t.disabled && typeof buildCache === 'function') buildCache();
+  const btn = (e.target && e.target.closest) ? e.target.closest('#themeToggle,#btnCache') : null;
+  if (!btn || e.__flx) return;
+  if (btn.id === 'themeToggle') toggleTheme();
+  else if (btn.id === 'btnCache' && !btn.disabled && typeof buildCache === 'function') buildCache();
 });
 /* 兜底: 载入时清掉可能残留的遮罩(否则会盖住整页导致"点不动"), 并复位缓存按钮 */
 document.addEventListener('DOMContentLoaded', () => {
@@ -1063,6 +1064,133 @@ document.addEventListener('DOMContentLoaded', () => {
     if (bc) bc.disabled = false;
   } catch (e) { }
 });
+/* ---------- 多语言 (webui/i18n/*.yml, 经 /api/i18n 下发) ---------- */
+const I18N = { lang: 'zh-CN', default: 'zh-CN', dict: {}, locales: [], _cache: {} };
+/* 短语表: 词典里 phr.<中文> = 译文; tp() 把界面里的中文片段替换掉 */
+let TP = { m: {}, keys: [] };
+function buildTP(dict) {
+  const m = {};
+  for (const k in (dict || {})) if (k.indexOf('phr.') === 0) m[k.slice(4)] = dict[k];
+  TP = { m: m, keys: Object.keys(m).sort((a, b) => b.length - a.length) };
+}
+function tpf(key, vars) {           // 整句短语 + {name} 占位替换(先按短语表翻译整句)
+  let s = tp(key);
+  for (const k in (vars || {})) s = s.split('{' + k + '}').join(String(tp(vars[k])));
+  return s;
+}
+function _i18nTypes() {              // 地块类型名(陆地/海洋/湖泊)跟随界面语言
+  try { TYPE_CN.land = tp('陆地'); TYPE_CN.sea = tp('海洋'); TYPE_CN.lake = tp('湖泊'); } catch (e) { }
+}
+function tp(s) {
+  if (s === undefined || s === null) return s;
+  let out = String(s);
+  if (!TP.keys.length || !/[\u4e00-\u9fff]/.test(out)) return out;
+  if (TP.m[out] !== undefined) return TP.m[out];
+  for (const k of TP.keys) if (k.length > 1 && out.indexOf(k) >= 0) out = out.split(k).join(TP.m[k]);
+  return out;
+}
+function t(key, fallback) {
+  const v = I18N.dict[key];
+  if (v === undefined || v === null || v === '') return (fallback !== undefined ? fallback : key);
+  return v;
+}
+function tfmt(key, params, fallback) {
+  let s = t(key, fallback);
+  const p = params || {};
+  for (const k in p) s = s.split('{' + k + '}').join(String(p[k]));
+  return s;
+}
+function _langSaved() { try { return localStorage.getItem('hoi4-lang') || ''; } catch (e) { return ''; } }
+async function loadI18n(lang) {
+  try {
+    const want = lang || _langSaved();
+    const r = await fetch('/api/i18n' + (want ? ('?lang=' + encodeURIComponent(want)) : ''), { cache: 'no-store' }).then(x => x.json());
+    if (!r || !r.ok) return false;
+    // 回退链: 当前语言 > en-US > zh-CN (只取一次, 之后用缓存)
+    async function _base(l) {
+      const key = 'd:' + l;
+      if (I18N._cache[key]) return I18N._cache[key];
+      try {
+        const rr = await fetch('/api/i18n?lang=' + l, { cache: 'no-store' }).then(x => x.json());
+        I18N._cache[key] = (rr && rr.dict) || {};
+      } catch (e) { I18N._cache[key] = {}; }
+      return I18N._cache[key];
+    }
+    const _zh = await _base('zh-CN');
+    const _en = await _base('en-US');
+    I18N.dict = Object.assign({}, _zh, _en, r.dict || {});
+    // 短语表: 目标语言自己的 > 英文(非中文时回退) > 中文(不翻译)
+    const _own = {}, _enp = {};
+    for (const k in (r.dict || {})) if (k.indexOf('phr.') === 0) _own[k] = r.dict[k];
+    for (const k in _en) if (k.indexOf('phr.') === 0) _enp[k] = _en[k];
+    I18N.lang = r.lang || I18N.lang;
+    buildTP(I18N.lang === 'zh-CN' ? {} : (Object.keys(_own).length ? _own : _enp));
+    I18N.lang = r.lang || 'zh-CN';
+    I18N.locales = r.locales || [];
+    I18N.default = r.default || 'zh-CN';
+    try { localStorage.setItem('hoi4-lang', I18N.lang); } catch (e) { }
+    document.documentElement.setAttribute('lang', I18N.lang);
+    // 从右到左(阿拉伯语等): 由 locales.yml 的 dir 字段或语言代码判断
+    const _loc = (I18N.locales || []).find(l => l.code === I18N.lang) || {};
+    const _rtl = (_loc.dir === 'rtl') || /^(ar|he|fa|ur)/i.test(I18N.lang);
+    document.documentElement.setAttribute('dir', _rtl ? 'rtl' : 'ltr');
+    if (I18N.dict['app.title']) document.title = I18N.dict['app.title'];
+    buildLangSelect();
+    applyI18n();
+    return true;
+  } catch (e) { return false; }
+}
+function applyI18n(root) {
+  const r = root || document;
+  r.querySelectorAll('[data-i18n]').forEach(el => { const v = t(el.getAttribute('data-i18n')); if (v) el.textContent = v; });
+  r.querySelectorAll('[data-i18n-html]').forEach(el => { const v = t(el.getAttribute('data-i18n-html')); if (v) el.innerHTML = v; });
+  r.querySelectorAll('[data-i18n-title]').forEach(el => { const v = t(el.getAttribute('data-i18n-title')); if (v) el.title = v; });
+  r.querySelectorAll('[data-i18n-ph]').forEach(el => { const v = t(el.getAttribute('data-i18n-ph')); if (v) el.placeholder = v; });
+  refreshDynamicI18n();
+}
+function refreshDynamicI18n() {
+  try {
+    // 参数表单(分析/细化页共用)是构建时生成的, 需要按当前语言重建
+    const _old = document.getElementById('cfgForm');
+    if (_old && _old.parentNode) {
+      const _tpl = buildCfgForm();
+      _old.parentNode.replaceChild(_tpl, _old);
+      App.cfgTpl = _tpl;
+      try { loadCfg(); } catch (e) { }
+    }
+  } catch (e) { }
+  try { if (MapView && MapView.layers) buildLayerControls(); } catch (e) { }
+  try { edUpdateTargetUI(); } catch (e) { }
+  try { if (App.sel) selectProvince(App.sel); } catch (e) { }
+  try { if (edTabActive()) edSyncPanels(); } catch (e) { }
+  try { _i18nTypes(); } catch (e) { }
+  try { const _e = $('#stSel'); if (_e) _e.textContent = tp(App.sel ? ('#' + App.sel) : '无'); } catch (e) { }
+  try { renderEditSel(); edSelInfo(); } catch (e) { }
+  try {
+    const _ids = MapView.tgtIds, _chip = $('#stTargets');
+    if (_chip) _chip.textContent = (_ids && _ids.size) ? tp('已选 {n} 个').split('{n}').join(String(_ids.size)) : tp('无');
+  } catch (e) { }
+  try { if (curAna && curAna.length) renderAnalyze(curAna); } catch (e) { }
+  try { const _rb = $('#reportBody'); if (_rb && !_rb.dataset.loaded) _rb.innerHTML = tp('选择一份报告查看。'); } catch (e) { }
+  try { const _pv = $('#previews'); if (_pv && !_pv.querySelector('img')) _pv.textContent = tp('运行后显示 修改前 / 修改后。'); } catch (e) { }
+  try {
+    if (!activeJob.run && !activeJob.audit) {
+      const _sm = $('#stMsg');
+      refreshState().then(() => { try { if (_sm) _sm.textContent = t('msg.ready', '就绪'); } catch (e) { } }).catch(() => { });
+    }
+  } catch (e) { }
+  try { applyTheme(document.documentElement.getAttribute('data-theme')); } catch (e) { }
+}
+function buildLangSelect() {
+  const sel = document.getElementById('langSelect');
+  if (!sel) return;
+  if (!sel.dataset.built) {
+    sel.innerHTML = (I18N.locales || []).map(l => '<option value="' + l.code + '">' + (l.label || l.code) + '</option>').join('');
+    sel.dataset.built = '1';
+    sel.onchange = () => loadI18n(sel.value);
+  }
+  sel.value = I18N.lang;
+}
 let _tabRestored = false;
 function restoreLastTab() {
   if (_tabRestored) return;
@@ -1086,7 +1214,7 @@ function initShortcuts() {
       return;
     }
     if (!typing && e.key === 'Escape') {
-      App.findIds = null; buildESel([]); selectProvince(null); setMsg('已清除选中');
+      App.findIds = null; buildESel([]); selectProvince(null); setMsg(t('msg.selCleared'));
       return;
     }
     if ((e.ctrlKey || e.metaKey) && !typing) {
@@ -1125,7 +1253,7 @@ async function doEditMerge() {
 async function doEditDelete() {
   if (!App.editSel.length) { setMsg('先选一个省份'); return; }
   const id = App.editSel[0];
-  if (!(await uiConfirm(`删除 #${id}（并入其最大邻居）？`))) return;
+  if (!(await uiConfirm(tfmt('prov.deleteConfirm', { id: id })))) return;
   const r = await editPost('/api/edit/delete', { id });
   if (r.ok) { paintMerge(r.into, [id]); App.editSel = []; renderEditSel(); buildESel(); showEditOps(r.status); setMsg(`#${id} 已并入 #${r.into}`); }
   else setMsg('删除失败: ' + r.error);
@@ -1153,12 +1281,12 @@ async function doEditSimple(kind) {
 }
 async function doEditExport() {
   const cfg = collectCfg();
-  if (!(await confirmOut('导出编辑结果到输出目录（并重建地图缓存）：', cfg))) return;
+  if (!(await confirmOut(t('undo.exportConfirm'), cfg))) return;
   const log = $('#edOps'); log.textContent = '';
   await runJob('/api/edit/export', cfg, {
     onLog: (m) => { _logAppend(log, m); },
     onDone: async (res) => {
-      log.textContent += `\n=== 导出完成: 移除 ${(res.removed || []).length} 个省份, 操作 ${res.ops} 个, ID 重命名 ${res.renamed} 处 ===`;
+      log.textContent += '\n' + tpf('=== 导出完成: 移除 {r} 个省份, 操作 {o} 个, ID 重命名 {n} 处 ===', { r: (res.removed || []).length, o: res.ops, n: res.renamed });
       setMsg('编辑已导出, 地图已刷新');
       App.editSel = []; renderEditSel(); buildESel();
       await boot(true);
@@ -1270,11 +1398,10 @@ function edRepaintMany(pids) {
 function edInfo(pid) {
   const info = App.idx[String(pid)];
   if (!info) return '';
-  return `#${pid} · ${TYPE_CN[info.type] || info.type} · 州 ${edCur(pid, 'state') || '—'}`
-    + ` · 战略区 ${edCur(pid, 'sr') || '—'} · 大洲 ${contName(info)}`;
+  return tpf('#{pid} · {type} · 州 {st} · 战略区 {sr} · 大洲 {ct}', { pid: pid, type: (TYPE_CN[info.type] || info.type), st: (edCur(pid, 'state') || '—'), sr: (edCur(pid, 'sr') || '—'), ct: contName(info) });
 }
 function edSelInfo() { const el = $('#edInfo'); if (el) el.textContent = App.editSel.length ? edInfo(App.editSel[0]) : ''; }
-const LAYER_CN = { prov: '地块', state: '州', sr: '战略区', continent: '大洲' };
+const LAYER_CN = { prov: 'layer.provShort', state: 'layer.stateShort', sr: 'layer.srShort', continent: 'layer.continentShort' };
 function edSame(layer, a, b) {
   if (a === undefined || a === null || a === '' || b === undefined || b === null || b === '') return false;
   if (layer === 'continent') return String(a) === String(b);
@@ -1282,7 +1409,7 @@ function edSame(layer, a, b) {
 }
 function edUpdateTargetUI() {
   const el = $('#edTarget'); if (!el) return;
-  el.textContent = '当前目标：' + (App.editTarget || '未选择') + '（图层：' + (LAYER_CN[App.editLayer] || '') + '）';
+  el.textContent = tfmt('edit.target', { v: App.editTarget || t('edit.targetNone') });
 }
 
 const SPARE_RGB = [[255, 90, 90], [90, 200, 255], [255, 200, 90], [150, 255, 120], [220, 130, 255], [120, 255, 220], [255, 150, 220], [180, 180, 255]];
@@ -1347,8 +1474,9 @@ async function edFillNextIds() {
     if (b.ok && $('#nsrId') && !$('#nsrId').value) $('#nsrId').value = b.next;
     const info = $('#nextIdInfo');
     if (info) {
-      const f = (x, nm) => nm + ' ' + (x.ok ? (x.next + (x.reused ? '（复用空闲）' : '')) : '?');
-      info.textContent = f(a, '州') + ' · ' + f(b, '战略区') + ' · ' + f(c, '省份') + '（空闲ID优先复用；创建前会再核对一次）';
+      const f = (x) => x.ok ? (x.next + (x.reused ? tp('（复用空闲）') : '')) : '?';
+      info.textContent = tp('州 {a} · 战略区 {b} · 省份 {c}（空闲ID优先复用；创建前会再核对一次）')
+        .split('{a}').join(String(f(a))).split('{b}').join(String(f(b))).split('{c}').join(String(f(c)));
     }
   } catch (e) { }
 }
@@ -1389,9 +1517,9 @@ async function edOnClick(pid, shift) {
   if (layer === 'terrain') {
     App.editSel = [pid]; App.sel = pid; renderEditSel(); edSelInfo(); buildESel();
     const nm = (App.terrain && App.terrain.prov) ? App.terrain.prov[String(pid)] : '';
-    if ($('#terCur')) $('#terCur').textContent = '地块 #' + pid + ' 当前地形: ' + (nm || '(无)');
+    if ($('#terCur')) $('#terCur').textContent = tpf('地块 #{pid} 当前地形: {t}', { pid: pid, t: (nm || tp('(无)')) });
     if (nm && $('#terSel')) $('#terSel').value = nm;
-    setMsg('已选地块 #' + pid + ' 地形 ' + (nm || '-'));
+    setMsg(tpf('已选地块 #{pid} 地形 {t}', { pid: pid, t: (nm || '-') }));
     return;
   }
   if (layer === 'rail') {
@@ -1428,7 +1556,7 @@ async function edOnClick(pid, shift) {
     if (!cur) {
       const info = App.idx[String(pid)] || {};
       if (layer === 'state' && (info.type === 'land' || info.type === 'lake')) {
-        if (!(await uiConfirm(`地块 #${pid} 不属于任何州，直接新建一个州并放入它？`))) return;
+        if (!(await uiConfirm(tfmt('state.createConfirm', { id: pid })))) return;
         const r = await editPost('/api/edit/new_state', {
           id: 0, provinces: [pid],
           owner: ($('#nsOwner') ? $('#nsOwner').value.trim() : ''),
@@ -1444,7 +1572,7 @@ async function edOnClick(pid, shift) {
           setMsg('已在 #' + pid + ' 新建州 ' + r.file + '（可在“编辑州”里改数据）');
         } else setMsg('新建州失败: ' + r.error);
       } else if (layer === 'sr') {
-        if (!(await uiConfirm(`地块 #${pid} 不属于任何战略区，直接新建战略区并放入它？`))) return;
+        if (!(await uiConfirm(tfmt('sr.createConfirm', { id: pid })))) return;
         const nid = Number(($('#nsrId') && $('#nsrId').value) || 0);
         const r = await editPost('/api/edit/new_sr', { id: nid, provinces: [pid] });
         if (r.ok) {
@@ -1453,7 +1581,7 @@ async function edOnClick(pid, shift) {
           setMsg('已新建战略区 ' + r.file);
         } else setMsg('新建战略区失败: ' + r.error);
       } else {
-        setMsg('该地块不属于任何' + LAYER_CN[layer] + '（先点一个有归属的地块）');
+        setMsg(tfmt('msg.notInLayer', { layer: t(LAYER_CN[layer]) }));
       }
       return;
     }
@@ -1461,16 +1589,16 @@ async function edOnClick(pid, shift) {
     edUpdateTargetUI(); edBuildTargetHL();
     if (layer === 'state') await edLoadStateData();
     if (layer === 'sr') await edLoadSrData();
-    setMsg('已选目标' + LAYER_CN[layer] + '：' + cur);
+    setMsg(tfmt('msg.selectedTarget', { layer: t(LAYER_CN[layer]), v: cur }));
     return;
   }
-  if (!App.editTarget) { setMsg('先点击一个地块来选择目标' + LAYER_CN[layer]); return; }
+  if (!App.editTarget) { setMsg(tfmt('msg.pickTargetFirst', { layer: t(LAYER_CN[layer]) })); return; }
   if (layer === 'state') {
     const info = App.idx[String(pid)] || {};
     if (info.type === 'sea') { setMsg('海洋地块不能放入州（只能陆地/湖泊）'); return; }
     const op = edSame(layer, cur, App.editTarget) ? 'remove' : 'add';
     const r = await editPost('/api/edit/assign', { level: 'state', pid, target: App.editTarget, op });
-    if (r.ok) { App.ovState[pid] = (op === 'add') ? App.editTarget : ''; edRepaint(pid); edSyncLayerMaps(); edBuildTargetHL(); showEditOps(r.status); setMsg(op === 'add' ? `#${pid} 加入 ${App.editTarget}` : `#${pid} 移出 ${App.editTarget}`); }
+    if (r.ok) { App.ovState[pid] = (op === 'add') ? App.editTarget : ''; edRepaint(pid); edSyncLayerMaps(); edBuildTargetHL(); showEditOps(r.status); setMsg(tpf('#{pid} {op} {t}', { pid: pid, op: (op === 'add' ? '加入' : '移出'), t: App.editTarget })); }
     else setMsg('失败: ' + r.error);
     return;
   }
@@ -1486,7 +1614,7 @@ async function edOnClick(pid, shift) {
       for (const p of pids) App.ovSr[p] = (op === 'add') ? App.editTarget : '';
       edRepaintMany(pids);
       edSyncLayerMaps(); edBuildTargetHL(); showEditOps(r.status);
-      setMsg(`${st}（${pids.length} 块）${op === 'add' ? '加入' : '移出'} 战略区 ${App.editTarget}`);
+      setMsg(tpf('{st}（{n} 块）{op} 战略区 {t}', { st: st, n: pids.length, op: (op === 'add' ? '加入' : '移出'), t: App.editTarget }));
     } else setMsg('失败: ' + r.error);
     return;
   }
@@ -1501,7 +1629,7 @@ async function edOnClick(pid, shift) {
       for (const p of pids) App.ovCont[p] = App.editTarget;
       edRepaintMany(pids);
       edSyncLayerMaps(); edBuildTargetHL(); showEditOps(r.status);
-      setMsg(`战略区 ${sr} 的 ${pids.length} 块陆地 → 大洲 ${App.editTarget}`);
+      setMsg(tpf('战略区 {sr} 的 {n} 块陆地 → 大洲 {t}', { sr: sr, n: pids.length, t: App.editTarget }));
     } else setMsg('失败: ' + r.error);
   }
 }
@@ -1581,13 +1709,13 @@ async function edTerrainSave() {
 }
 async function edTerrainExport() {
   const r = await editPost('/api/edit/export_terrain', {});
-  if (r.ok) { setMsg('已导出 terrain.bmp: ' + (r.result && r.result.path)); await uiAlert('已生成并导出：\n' + ((r.result && r.result.path) || '')); }
+  if (r.ok) { setMsg('已导出 terrain.bmp: ' + (r.result && r.result.path)); await uiAlert(tp('已生成并导出：') + '\n' + ((r.result && r.result.path) || '')); }
   else setMsg('导出失败: ' + r.error);
 }
 async function edTerrainAuto() {
-  if (!(await uiConfirm('用 terrain.bmp 自动生成所有陆地地块的地形（会覆盖 definition.csv 的地形列）？'))) return;
+  if (!(await uiConfirm(t('terrain.autoConfirm')))) return;
   const r = await editPost('/api/edit/terrain_auto', {});
-  if (r.ok) { showEditOps(r.status); await edLoadTerrainData(); setMsg('已自动生成地形：' + (r.count || '') + ' 块'); }
+  if (r.ok) { showEditOps(r.status); await edLoadTerrainData(); setMsg(tpf('已自动生成地形：{n} 块', { n: (r.count || '') })); }
   else setMsg('失败: ' + r.error);
 }
 
@@ -1602,10 +1730,10 @@ async function edLoadRailData() {
       const c = (t) => es.filter(e => e.type === t).length;
       const shown = (t) => (App.adjShow && App.adjShow[t]) ? c(t) : 0;
       const geo = (t) => es.filter(e => e.type === t && ((e.segments && e.segments.length) || (e.path && e.path.length))).length;
-      $('#railStat').innerHTML = App.railData.rails.length + ' 条铁路 · ' + App.railData.supplies.length + ' 个补给站<br>' +
+      $('#railStat').innerHTML = tp( App.railData.rails.length + ' 条铁路 · ' + App.railData.supplies.length + ' 个补给站<br>' +
         '相邻叠加：海峡 ' + c('strait') + '/几何' + geo('strait') + ' · 运河 ' + c('canal') + '/几何' + geo('canal') +
         ' · 不可通行 ' + c('impassable') + '/几何' + geo('impassable') +
-        '　显示中：海' + shown('strait') + '/运' + shown('canal') + '/不可' + shown('impassable');
+        '　显示中：海' + shown('strait') + '/运' + shown('canal') + '/不可' + shown('impassable'));
       if (c('impassable') && !shown('impassable')) $('#railStat').innerHTML += '<br><b style="color:#ffd23f">不可通行当前被隐藏：请勾选下面的"不可通行屏障"</b>';
     }
     requestDraw();
@@ -1796,7 +1924,7 @@ async function edExtra(kind, op) {
     const wx = cen ? cen[0] * (App.meta ? App.meta.width / App.meta.disp_width : 2) : 0;
     const wy = cen ? cen[1] * (App.meta ? App.meta.height / App.meta.disp_height : 2) : 0;
     const r = await editPost('/api/edit/building', { pid, key, wx, wy, op });
-    if (r.ok) { showEditOps(r.status); setMsg('已加建筑 ' + key + ' @#' + pid); } else setMsg('失败: ' + r.error);
+    if (r.ok) { showEditOps(r.status); setMsg(tpf('已加建筑 {k} @#{pid}', { k: key, pid: pid })); } else setMsg('失败: ' + r.error);
   }
 }
 function edApplyMode() {
@@ -1831,22 +1959,15 @@ function edSyncPanels() {
   if ($('#fsNewSr')) $('#fsNewSr').style.display = (L === 'sr') ? '' : 'none';
   if ($('#fsProv')) $('#fsProv').style.display = (L === 'prov') ? '' : 'none';
   if ($('#fsTerrain')) $('#fsTerrain').style.display = (L === 'terrain') ? '' : 'none';
-  const HINTS = {
-    state: '点击一个地块 = 选它所在的州为目标；Shift+点击 = 把该地块加入/移出目标州；点到不属于任何州的地块 = 新建州。',
-    sr: '点击一个地块 = 选它所在的战略区为目标；Shift+点击 = 把“整个州”加入/移出目标战略区。',
-    continent: '点击一个地块 = 选大洲为目标；Shift+点击 = 把“整个战略区”的陆地地块改成目标大洲。',
-    prov: '点击 = 选中地块；Shift+点击 = 多选；再用上面的“合并 / 删除（并入最大邻居）”。',
-    rail: 'Shift+点两个地块 = 自动建铁路（只走陆地，可跨海峡/运河）；点铁路线 = 选中改等级/删除；点地块 = 增删补给中心。',
-    terrain: '点击地块 = 选中并在下面选地形保存；也可一键自动生成，或由 definition.csv 反向导出 terrain.bmp。',
-  };
-  if ($('#edHint')) $('#edHint').textContent = HINTS[L] || '';
+  if ($('#edHint')) $('#edHint').textContent = t('hint.' + L, '');
+
   if (L === 'terrain' && !App.terrain) edLoadTerrainData();
   if (L === 'sr') edLoadSrData();
   if (L === 'rail') edLoadRailData();
 }
 
 async function edLoadStateData() {
-  if (App.editLayer !== 'state' || !App.editTarget) { if ($('#nsCur')) $('#nsCur').textContent = '未选择州'; if ($('#nsEditId')) $('#nsEditId').value = ''; return; }
+  if (App.editLayer !== 'state' || !App.editTarget) { if ($('#nsCur')) $('#nsCur').textContent = tp('未选择州'); if ($('#nsEditId')) $('#nsEditId').value = ''; return; }
   try {
     const r = await fetch('/api/edit/state_data?' + new URLSearchParams(Object.assign(editParams(), { file: App.editTarget })).toString()).then(r => r.json());
     if (!r.ok) { setMsg('读取州数据失败: ' + r.error); if ($('#nsCur')) $('#nsCur').textContent = '读取失败: ' + r.error; return; }
@@ -2008,12 +2129,12 @@ async function loadIndex() {
     App.provs = Object.keys(idx).map(k => ({ id: Number(k), ...idx[k] }));
     App.provs.sort((a, b) => a.id - b.id);
   App._idxState = null; App._idxSr = null;
-    $('#mapInfo').innerHTML = `地图 <b>${App.meta.width}×${App.meta.height}</b>（显示 ${App.meta.disp_width}×${App.meta.disp_height}）<br>
+    $('#mapInfo').innerHTML = tp( `地图 <b>${App.meta.width}×${App.meta.height}</b>（显示 ${App.meta.disp_width}×${App.meta.disp_height}）<br>
       省份 <b>${App.provs.length}</b> · 战略区 <b>${(reg.sr || []).length}</b> · 州 <b>${(reg.state || []).length}</b> · 大洲 <b>${(reg.continents || []).length}</b><br>
-      最大ID <b>${App.meta.max_id}</b>`;
+      最大ID <b>${App.meta.max_id}</b>`);
     renderProvTable();
   } catch (e) {
-    $('#mapInfo').textContent = '省份索引加载失败: ' + e.message;
+    $('#mapInfo').textContent = tp('省份索引加载失败:') + ' ' + e.message;
   }
 }
 
@@ -2039,7 +2160,7 @@ function renderProvTable() {
   });
   const CAP = 600;
   const shown = rows.slice(0, CAP);
-  $('#pCount').textContent = `匹配 ${rows.length} 个` + (rows.length > CAP ? `（仅显示前 ${CAP} 个，请细化筛选）` : '');
+  $('#pCount').textContent = tpf('匹配 {n} 个', { n: rows.length }) + (rows.length > CAP ? tpf('（仅显示前 {c} 个，请细化筛选）', { c: CAP }) : '');
   const tb = $('#provTable tbody');
   tb.innerHTML = shown.map(r => `<tr data-id="${r.id}">
     <td>${r.id}</td>
@@ -2083,14 +2204,14 @@ async function doAnalyze() {
   if (!(await needServer())) return;
   collectCfg();
   setBusy('analyze', true);
-  $('#anaSummary').textContent = '运行中…';
+  $('#anaSummary').textContent = tp('运行中…');
   activeJob.analyze = await runJob('/api/analyze', collectCfg(), {
     onLog: () => { },
     onDone: (res) => {
       setBusy('analyze', false);
       const rows = res.detected || [];
       renderAnalyze(rows);
-      $('#anaSummary').innerHTML = `检测到 <b>${rows.length}</b> 个待细化地块，预计新建 <b>${(res.created || []).length || '—'}</b> 个，用时 ${res.elapsed.toFixed(1)}s`;
+      $('#anaSummary').innerHTML = tp( `检测到 <b>${rows.length}</b> 个待细化地块，预计新建 <b>${(res.created || []).length || '—'}</b> 个，用时 ${res.elapsed.toFixed(1)}s`);
       setMsg(`分析完成: ${rows.length} 个目标`);
     },
     onErr: (e) => { setBusy('analyze', false); $('#anaSummary').textContent = '失败: ' + fmtErr(e); setMsg('分析失败'); },
@@ -2110,37 +2231,38 @@ async function confirmOut(action, cfg) {
   const ow = outOverlapsMod(cfg);
   const mod = String(cfg.mod_dir || '').trim();
   const src = mod || String(cfg.game_dir || '').trim();
-  const label = mod ? 'mod' : '原版游戏';
+  const label = mod ? 'mod' : tp('原版游戏');
   const inPlace = !!cfg.in_place;
   const target = inPlace ? (mod || src) : cfg.out_dir;
+  const L = (s, ow2) => tp(s).split('{label}').join(label).split('{src}').join(src || tp('(未设置)'));
   let head = '';
   if (inPlace) {
-    head = '⚠⚠ 严重提示：你勾选了【⚠ 直接改原 mod (危险)】！\n' +
-      (mod ? ('会直接修改 mod 目录（不写输出目录）：\n' + mod)
-           : ('没有填 mod —— 这会直接修改【原版游戏】目录：\n' + src)) +
-      '\n原文件不会备份，无法恢复。\n\n';
+    head = '⚠⚠ ' + tp('严重提示：你勾选了【⚠ 直接改原 mod (危险)】！') + '\n' +
+      (mod ? (tp('会直接修改 mod 目录（不写输出目录）：') + '\n' + mod)
+           : (tp('没有填 mod —— 这会直接修改【原版游戏】目录：') + '\n' + src)) + '\n' +
+      tp('原文件不会备份，无法恢复。') + '\n\n';
   } else if (ow === 'same') {
-    head = '⚠⚠ 严重提示：输出目录和' + label + '目录【完全相同】！\n' +
-      (mod ? '' : '你没有填 mod —— 这会覆盖【原版游戏】本身！\n') +
-      '细化会先清空该目录、再写回结果，原文件无法恢复。\n\n';
+    head = '⚠⚠ ' + L('严重提示：输出目录和{label}目录【完全相同】！') + '\n' +
+      (mod ? '' : tp('你没有填 mod —— 这会覆盖【原版游戏】本身！') + '\n') +
+      tp('细化会先清空该目录、再写回结果，原文件无法恢复。') + '\n\n';
   } else if (ow === 'inside') {
-    head = '⚠ 提示：输出目录在' + label + '目录【内部】！\n' +
-      '写出的文件会直接改写 ' + label + ' 里的对应文件（谨慎操作）。\n\n';
+    head = '⚠ ' + L('提示：输出目录在{label}目录【内部】！') + '\n' +
+      L('写出的文件会直接改写 {label} 里的对应文件（谨慎操作）。') + '\n\n';
   }
-  return uiConfirm(head + action + '\n' + target +
-    '\n\n数据来源（' + (mod ? 'mod' : '原版游戏') + '）：' + (src || '(未设置)') +
-    (inPlace ? '\n写入方式：直接改源目录（勾选了"直接改原 mod (危险)"）'
-             : '\n覆盖检查：' + (ow ? '会覆盖 ' + label + '！' : '输出与 ' + label + ' 不同，不会覆盖源目录')) +
-    '\n\n继续吗？', { danger: !!head });
+  return uiConfirm(head + action + '\n' + target + '\n\n' +
+    L('数据来源（{label}）：{src}') +
+    (inPlace ? '\n' + tp('写入方式：直接改源目录（勾选了"直接改原 mod (危险)"）')
+             : '\n' + L(ow ? '覆盖检查：会覆盖 {label}！' : '覆盖检查：输出与 {label} 不同，不会覆盖源目录')) +
+    '\n\n' + tp('继续吗？'), { danger: !!head });
 }
 async function doRun() {
   if (!(await needServer())) return;
   const cfg = collectCfg();
-  if (!(await confirmOut('将开始细化并写出文件到输出目录：', cfg))) return;
+  if (!(await confirmOut(t('run.confirm'), cfg))) return;
   setBusy('run', true);
   $('#log').textContent = '';
-  $('#runSummary').textContent = '运行中…';
-  $('#previews').textContent = '运行中…';
+  $('#runSummary').textContent = tp('运行中…');
+  $('#previews').textContent = tp('运行中…');
   activeJob.run = await runJob('/api/run', cfg, {
     onLog: (m) => { _logAppend($('#log'), m); },
     onDone: (res) => {
@@ -2155,12 +2277,12 @@ async function doRun() {
 function renderRunResult(res) {
   clearTargets(true);   // 地图已变化, 旧目标高亮失效
   const created = res.created || [];
-  $('#runSummary').innerHTML = `
+  $('#runSummary').innerHTML = tp(`
     检测 <b>${res.counts.detected}</b> · 新建 <b>${res.counts.created}</b> · 用时 <b>${res.elapsed.toFixed(1)}s</b><br>
     输出目录 <span class="tiny">${res.out_dir || ''}</span><br>
     报告 <span class="tiny">${res.report_csv || '—'}</span><br>
     ${(res.notes && res.notes.length) ? '备注: ' + res.notes.join(' / ') : ''}
-    ${created.length ? `<div class="tiny" style="margin-top:6px">新建省份（示例）: ${created.slice(0, 12).map(c => '#' + c.prov_id + '→' + (c.new_ids || []).join(',')).join('  ')}${created.length > 12 ? ' …' : ''}</div>` : ''}`;
+    ${created.length ? `<div class="tiny" style="margin-top:6px">新建省份（示例）: ${created.slice(0, 12).map(c => '#' + c.prov_id + '→' + (c.new_ids || []).join(',')).join('  ')}${created.length > 12 ? ' …' : ''}</div>` : ''}`);
   const pb = res.preview_before ? `/api/file?path=${encodeURIComponent(res.preview_before)}&t=${Date.now()}` : '';
   const pa = res.preview_after ? `/api/file?path=${encodeURIComponent(res.preview_after)}&t=${Date.now()}` : '';
   if (pb && pa) {
@@ -2169,7 +2291,7 @@ function renderRunResult(res) {
       + `<img class="cmp-img cmp-after" src="${pa}" style="clip-path:inset(0 50% 0 0)">`
       + '<div class="cmp-line" style="left:50%"></div>'
       + '<input type="range" class="cmp-range" min="0" max="100" value="50">'
-      + '</div><div class="tiny">拖动滑块对比：左=修改后，右=修改前</div>';
+      + '</div><div class="tiny">' + tp('拖动滑块对比：左=修改后，右=修改前') + '</div>';
     const rng = $('#previews .cmp-range');
     rng.oninput = () => {
       const v = Number(rng.value);
@@ -2177,10 +2299,10 @@ function renderRunResult(res) {
       $('#previews .cmp-line').style.left = v + '%';
     };
   } else if (pb || pa) {
-    const p = pb || pa, t = pb ? '修改前' : '修改后';
+    const p = pb || pa, t = tp(pb ? '修改前' : '修改后');
     $('#previews').innerHTML = `<div class="tiny">${t}</div><img class="previmg" src="${p}">`;
   } else {
-    $('#previews').innerHTML = '<div class="tiny">未生成预览图（make_preview 关闭？）。</div>';
+    $('#previews').innerHTML = tp('<div class="tiny">未生成预览图（make_preview 关闭？）。</div>');
   }
 }
 
@@ -2188,7 +2310,7 @@ async function doAudit() {
   if (!(await needServer())) return;
   collectCfg();
   $('#audSpinner').style.display = 'inline-flex';
-  $('#auditBody').innerHTML = '检查中…';
+  $('#auditBody').innerHTML = tp('检查中…');
   await runJob('/api/audit', { mod_dir: $('#modDir').value.trim(), game_dir: ($('#gameDir') ? $('#gameDir').value.trim() : '') }, {
     onLog: () => { },
     onDone: (info) => {
@@ -2202,7 +2324,7 @@ async function doAudit() {
 async function doRepair() {
   if (!(await needServer())) return;
   const cfg = collectCfg();
-  if (!(await confirmOut('将按当前参数【只修复、不拆分】，把修正写到输出目录：', cfg))) return;
+  if (!(await confirmOut(t('aud.repairConfirm'), cfg))) return;
   $('#btnRepair').disabled = true; $('#btnAudit').disabled = true;
   $('#repSpinner').style.display = 'inline-flex';
   const log = $('#repairLog'); log.textContent = '';
@@ -2212,7 +2334,7 @@ async function doRepair() {
       $('#btnRepair').disabled = false; $('#btnAudit').disabled = false;
       $('#repSpinner').style.display = 'none';
       const notes = (res.notes || []).join('\n');
-      log.textContent += `\n=== 完成: 检测 ${res.counts.detected}, 新建 ${res.counts.created}, 用时 ${res.elapsed.toFixed(1)}s ===\n` + notes + '\n输出: ' + (res.out_dir || '');
+      log.textContent += '\n' + tpf('=== 完成: 检测 {d}, 新建 {c}, 用时 {t}s ===', { d: res.counts.detected, c: res.counts.created, t: res.elapsed.toFixed(1) }) + '\n' + notes + '\n' + tp('输出: ') + (res.out_dir || '');
       log.scrollTop = log.scrollHeight;
       setMsg('修复完成');
       doAudit();
@@ -2242,13 +2364,13 @@ const AUDIT_CN = {
 function renderAudit(info) {
   const bad = (k) => /dup|invalid|broken|bad|crossings|disconnected|fragments|missing|split/.test(k);
   const WARN = /^(adjacency_bad|impassable_bad|impassable_rows|canal_missing|canal_rules_unresolved|canal_required_provinces_to_remove|canal_bank_provinces_to_add)$/;
-  let html = '<p class="hint">红色=需要处理；黄色=海峡/运河/不可通行预警，仅供参考，需<b>手动</b>修复。</p>';
+  let html = tp('<p class="hint">红色=需要处理；黄色=海峡/运河/不可通行预警，仅供参考，需<b>手动</b>修复。</p>');
   for (const k of Object.keys(info)) {
     if (k.endsWith('_items') || k.endsWith('_src') || k === 'adjacency_bad_rows' || k === 'ref_invalid_examples') continue;
     let cls = '';
     if (WARN.test(k)) cls = info[k] > 0 ? 'warn' : 'ok';
     else if (bad(k)) cls = info[k] > 0 ? 'bad' : 'ok';
-    html += `<div class="stat"><span>${AUDIT_CN[k] || k}</span><span class="badge ${cls}">${info[k]}</span></div>`;
+    html += `<div class="stat"><span>${tp(AUDIT_CN[k] || k)}</span><span class="badge ${cls}">${info[k]}</span></div>`;
   }
   const dupSr = info.sr_dup_items || [], dupSt = info.state_dup_items || [], ab = info.adjacency_bad_rows || [];
   const stSplit = info.state_split_items || [], srSplit = info.sr_split_items || [];
@@ -2257,8 +2379,8 @@ function renderAudit(info) {
   html += list('州重复示例', dupSt, ([i, fs]) => `#${i} → ${fs.map(x => x.split(/[\\/]/).pop()).join(', ')}`);
   if (info.adjacencies_src) html += `<div class="tiny" style="margin-top:6px">海峡/运河/不可通行 统计来源：<b>${info.adjacencies_src}</b></div>`;
   html += list('海峡/运河/不可通行异常示例（黄色预警，仅供参考，需手动修复）', ab, ([f, t, th, ty]) => `${f};${t};${ty};${th}`);
-  html += list('州不连续示例（州内省份未连成一片）', stSplit, ([f, n, c]) => `${f} → ${n} 片 / ${c} 块`);
-  html += list('战略区不连续示例', srSplit, ([f, n, c]) => `${f} → ${n} 片 / ${c} 块`);
+  html += list('州不连续示例（州内省份未连成一片）', stSplit, ([f, n, c]) => tpf('{f} → {n} 片 / {c} 块', { f: f, n: n, c: c }));
+  html += list('战略区不连续示例', srSplit, ([f, n, c]) => tpf('{f} → {n} 片 / {c} 块', { f: f, n: n, c: c }));
   $('#auditBody').innerHTML = html;
 }
 
@@ -2266,7 +2388,8 @@ function renderAudit(info) {
 /* 报告                                                                */
 /* ------------------------------------------------------------------ */
 async function loadReport(kind) {
-  $('#reportBody').innerHTML = '加载中…';
+  const _rb0 = $('#reportBody'); if (_rb0) _rb0.dataset.loaded = '1';
+  $('#reportBody').innerHTML = tp('加载中…');
   const out = $('#outDir').value.trim();
   const r = await fetch('/api/report?kind=' + kind + '&out=' + encodeURIComponent(out)).then(r => r.json());
   if (!r.exists) { $('#reportBody').innerHTML = `<div class="tiny">未找到报告文件: ${r.path}</div>`; return; }
@@ -2275,9 +2398,9 @@ async function loadReport(kind) {
     const cells = lines.map(l => l.split(','));
     const head = cells[0] || [];
     const body = cells.slice(1);
-    $('#reportBody').innerHTML = `<div class="tiny">${r.path} · ${body.length} 行</div>
+    $('#reportBody').innerHTML = tp( `<div class="tiny">${r.path} · ${tpf('{n} 行', { n: body.length })}</div>
       <div class="tblwrap"><table class="tbl"><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead>
-      <tbody>${body.slice(0, 2000).map(row => `<tr>${row.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+      <tbody>${body.slice(0, 2000).map(row => `<tr>${row.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
   } else {
     $('#reportBody').innerHTML = `<div class="tiny">${r.path}</div><pre class="code">${r.text.replace(/</g, '&lt;')}</pre>`;
   }
@@ -2286,11 +2409,11 @@ async function loadReport(kind) {
 /* ------------------------------------------------------------------ */
 /* 缓存 / 状态                                                         */
 /* ------------------------------------------------------------------ */
-function setMsg(m) { $('#stMsg').textContent = m; }
+function setMsg(m) { $('#stMsg').textContent = tp(m); }
 function setChip(ok, text) {
   const c = $('#cacheChip');
   c.className = 'chip ' + (ok ? 'ok' : 'bad');
-  c.textContent = text;
+  c.textContent = tp(text);
 }
 
 async function refreshState() {
@@ -2301,7 +2424,7 @@ async function refreshState() {
   else if (!st.mod_exists) setChip(false, 'mod 路径无效');
   else if (st.cache_exists) {
     const m = st.cache_meta || {};
-    setChip(true, `缓存就绪 · ${m.width}×${m.height} · 省份${st.provinces || '?'}`);
+    setChip(true, `缓存就绪 · ${m.width}×${m.height} · 省份 ${st.provinces || '?'}`);
   } else setChip(false, '需要构建缓存');
   return st;
 }
@@ -2309,18 +2432,18 @@ async function refreshState() {
 async function buildCache() {
   const mod = $('#modDir').value.trim();
   const game = $('#gameDir') ? $('#gameDir').value.trim() : '';
-  setMsg('正在构建缓存…');
+  setMsg(t('msg.cacheBuilding'));
   $('#btnCache').disabled = true;
-  const t = await runJob('/api/cache/build', { mod_dir: mod, game_dir: game, ref: ($('#edRef') ? $('#edRef').value : 'mod') }, {
+  const job = await runJob('/api/cache/build', { mod_dir: mod, game_dir: game, ref: ($('#edRef') ? $('#edRef').value : 'mod') }, {
     onLog: (m) => setMsg(m),
     onDone: async () => {
       $('#btnCache').disabled = false;
-      setMsg('缓存完成');
+      setMsg(t('msg.cacheDone'));
       await boot(true);
     },
-    onErr: async (e) => { $('#btnCache').disabled = false; setMsg('缓存失败: ' + fmtErr(e)); await uiAlert('缓存构建失败:\n' + fmtErr(e)); },
+    onErr: async (e) => { $('#btnCache').disabled = false; setMsg(tfmt('msg.cacheFail', { e: fmtErr(e) })); await uiAlert(t('msg.cacheBuildFail') + '\n' + fmtErr(e)); },
   });
-  return t;
+  return job;
 }
 
 /* ------------------------------------------------------------------ */
@@ -2359,7 +2482,7 @@ async function boot(reload) {
   edSyncPanels();
   const st = await refreshState();
   if (!st.cache_exists) {
-    $('#mapInfo').innerHTML = '尚未构建缓存。点击右上角 <b>构建/刷新缓存</b> 生成地图图层。';
+    $('#mapInfo').innerHTML = tp('尚未构建缓存。点击右上角 <b>构建/刷新缓存</b> 生成地图图层。');
     return;
   }
   App.meta = await fetch('/cache/meta.json?t=' + Date.now()).then(r => r.json());
@@ -2374,11 +2497,13 @@ async function boot(reload) {
   }
   restoreLastTab();
   edApplyMode();
-  setMsg('就绪');
+  applyI18n();
+  setMsg(t('msg.ready', '就绪'));
 }
 
 function initUI() {
   initTheme();
+  loadI18n();
   App.cfgTpl = buildCfgForm();
   $('.pane[data-pane="refine"]').appendChild(App.cfgTpl);
   loadCfg();

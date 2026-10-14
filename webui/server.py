@@ -295,6 +295,68 @@ def api_file():
     return send_file(rp)
 
 
+I18N_DIR = os.path.join(HERE, "i18n")
+_I18N_MEM = {}
+
+
+def _i18n_locales():
+    p = os.path.join(I18N_DIR, "locales.yml")
+    try:
+        import yaml
+        d = yaml.safe_load(open(p, encoding="utf-8")) or {}
+        return (d.get("locales") or []), (str(d.get("default") or "zh-CN"))
+    except Exception:
+        return [], "zh-CN"
+
+
+def i18n_dict(lang=None):
+    """返回 (实际语言, 词典)。按 mtime 缓存。"""
+    locales, default = _i18n_locales()
+    codes = [str(l.get("code")) for l in locales]
+    if not lang or lang not in codes:
+        lang = default
+    fname = "zh-CN.yml"
+    for l in locales:
+        if str(l.get("code")) == lang:
+            fname = str(l.get("file") or fname)
+    p = os.path.join(I18N_DIR, fname)
+    pp = os.path.join(I18N_DIR, "phr-%s.yml" % lang)     # 可选: 短语表
+    try:
+        import yaml
+    except Exception:
+        return lang, {}
+    try:
+        ck = ((p, os.path.getmtime(p)),
+              (pp, os.path.getmtime(pp)) if os.path.isfile(pp) else (pp, 0))
+    except OSError:
+        return lang, {}
+    if ck in _I18N_MEM:
+        return lang, _I18N_MEM[ck]
+    try:
+        d = yaml.safe_load(open(p, encoding="utf-8")) or {}
+    except Exception:
+        d = {}
+    if os.path.isfile(pp):
+        try:
+            d2 = yaml.safe_load(open(pp, encoding="utf-8")) or {}
+            merged = dict(d2)
+            merged.update(d)          # 语言文件里的键优先于短语表
+            d = merged
+        except Exception:
+            pass
+    _I18N_MEM.clear()
+    _I18N_MEM[ck] = d
+    return lang, d
+
+
+@app.route("/api/i18n")
+def api_i18n():
+    locales, default = _i18n_locales()
+    lang, d = i18n_dict((request.args.get("lang") or "").strip() or None)
+    return jsonify({"ok": True, "lang": lang, "default": default,
+                    "locales": locales, "dict": d})
+
+
 @app.route("/api/deps")
 def api_deps():
     import importlib.util
