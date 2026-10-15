@@ -831,9 +831,11 @@ async function depCheck() {
     if (!r.flask) miss.push('flask');
     if (!r.numpy) miss.push('numpy');
     if (!r.pillow) miss.push('pillow(PIL)');
+    if (!r.yaml) miss.push('yaml');
     window._depMissing = miss;
     if (el) el.innerHTML = 'Python <b>' + r.python + '</b> · flask ' + (r.flask ? '✅' : '❌') +
       ' · numpy ' + (r.numpy ? '✅' : '❌') + ' · Pillow ' + (r.pillow ? '✅' : '❌') +
+      ' · yaml ' + (r.yaml ? '✅' : '❌') +
       (miss.length ? '　<b style="color:#ffd23f">缺少: ' + miss.join(', ') + '</b>（选好源后点"一键安装"）' : '　全部就绪 ✅');
   } catch (e) { if (el) el.textContent = '检测失败: ' + e.message; }
 }
@@ -841,7 +843,7 @@ async function depInstall() {
   const el = $('#depInfo');
   const miss = window._depMissing || [];
   if (!miss.length) { setMsg('依赖已齐全，无需安装'); depCheck(); return; }
-  const pkgs = miss.map(m => m.indexOf('pillow') === 0 ? 'pillow' : m);
+  const pkgs = miss.map(m => (m === 'yaml' ? 'pyyaml' : (m.indexOf('pillow') === 0 ? 'pillow' : m)));
   const mirror = $('#depMirror') ? $('#depMirror').value : '';
   if (el) el.textContent = '正在安装 ' + pkgs.join(', ') + '（' + (mirror || '官方源') + '）… 请稍候（可能 1-2 分钟）';
   try {

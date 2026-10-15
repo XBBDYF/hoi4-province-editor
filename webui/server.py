@@ -368,7 +368,8 @@ def api_deps():
         except Exception:
             return False
     return jsonify({"ok": True, "python": _sys.version.split()[0],
-                    "flask": _has("flask"), "numpy": _has("numpy"), "pillow": _has("PIL")})
+                    "flask": _has("flask"), "numpy": _has("numpy"), "pillow": _has("PIL"),
+                    "yaml": _has("yaml")})
 
 
 @app.route("/api/deps/install", methods=["POST"])

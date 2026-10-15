@@ -42,6 +42,7 @@ DEPS = [
     ("flask", "flask"),
     ("numpy", "numpy"),
     ("PIL", "pillow"),
+    ("yaml", "pyyaml"),
 ]
 
 
