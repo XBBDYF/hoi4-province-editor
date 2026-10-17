@@ -443,9 +443,11 @@ function requestDraw() {
 function draw() {
   const c = MapView.canvas, ctx = MapView.ctx;
   if (!c || !ctx) return;
+  const dpr = MapView.dpr || (window.devicePixelRatio || 1);
   const w = c.width, h = c.height;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = '#0d0f13'; ctx.fillRect(0, 0, w, h);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);   // 恢复 devicePixelRatio 缩放(resizeCanvas 设过, 但上面被重置了)
   const { s, x, y } = MapView.cam;
   if (!MapView.inited) return;
   const dw = MapView.W * s, dh = MapView.H * s;

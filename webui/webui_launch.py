@@ -208,6 +208,20 @@ def main():
     st = _probe(args.port)
     if st == "ok":
         print("\n[提示] 检测到 Web 服务已经在运行 (端口 %d)。" % args.port)
+        try:
+            import urllib.request as _ur
+            import json as _json
+            with _ur.urlopen("http://127.0.0.1:%d/api/defaults" % int(args.port), timeout=2) as _r:
+                _d = _json.loads(_r.read().decode("utf-8", "replace"))
+            _out = os.path.normcase(os.path.abspath(str(_d.get("out_dir") or "")))
+            _mine = os.path.normcase(os.path.abspath(os.path.join(os.path.dirname(HERE), "output")))
+            if _out and _out != _mine:
+                print("       [注意] 正在运行的服务来自另一个目录，不是本目录：")
+                print("              服务目录: %s" % os.path.dirname(_out))
+                print("              本  目录: %s" % os.path.dirname(_mine))
+                print("       请先关掉那个服务窗口(或结束对应 python 进程)，再重新启动本程序。")
+        except Exception:
+            pass
         print("       不会重复启动；直接打开浏览器即可。")
         print("       如需重启：关掉原来的服务窗口(或结束后台 python 进程)后再运行本程序。")
         try:
