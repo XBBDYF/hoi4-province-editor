@@ -527,30 +527,38 @@ function drawLinks(ctx, alpha) {
 
 function drawBorders(ctx, alpha, arr) {
   const area = $('#maparea');
+  const dpr = MapView.dpr || (window.devicePixelRatio || 1);
   const cw = Math.max(1, area.clientWidth | 0), ch = Math.max(1, area.clientHeight | 0);
+  // 边框遮罩按"设备像素"生成: 否则按 CSS 分辨率画、再被 ctx 放大,
+  // 1px 线会随平移在 1~2 设备像素之间跳, 看起来忽粗忽细(划屏时最明显)。
+  const mainC = MapView.canvas;
+  const dw = Math.max(1, mainC && mainC.width ? mainC.width : Math.round(cw * dpr));
+  const dh = Math.max(1, mainC && mainC.height ? mainC.height : Math.round(ch * dpr));
   if (!MapView.bc) {
     MapView.bc = document.createElement('canvas');
     MapView.bctx = MapView.bc.getContext('2d');
   }
   const bc = MapView.bc, bctx = MapView.bctx;
-  if (bc.width !== cw || bc.height !== ch) {
-    bc.width = cw; bc.height = ch; MapView.bim = null;
+  if (bc.width !== dw || bc.height !== dh) {
+    bc.width = dw; bc.height = dh; MapView.bim = null;
   }
-  if (!MapView.bim) MapView.bim = bctx.createImageData(cw, ch);
+  if (!MapView.bim) MapView.bim = bctx.createImageData(dw, dh);
   const out = MapView.bim.data;
   out.fill(0);
 
   const { s, x, y } = MapView.cam, inv = 1 / s;
   const pid = arr || MapView.pid, W = MapView.pidW, H = MapView.pidH;
-  const step = inv;                            // 世界坐标里对应 1 个屏幕像素
-  for (let sy = 0; sy < ch; sy++) {
-    const wy = (sy - y) * inv, wy1 = wy + step;
+  const step = inv / dpr;                      // 世界坐标里对应 1 个设备像素
+  const xd = x * dpr, yd = y * dpr;            // 相机偏移换算到设备像素
+  for (let sy = 0; sy < dh; sy++) {
+    const wy = (sy - yd) * step, wy1 = wy + step;
     const py = Math.floor(wy), py1 = Math.floor(wy1);
     const rowA = (py >= 0 && py < H) ? py * W : -1;
     const rowB = (py1 >= 0 && py1 < H) ? py1 * W : -1;
-    let wx = (0 - x) * inv;
-    let o = sy * cw * 4;
-    for (let sx = 0; sx < cw; sx++, o += 4, wx += step) {
+    if (rowA < 0 && rowB < 0) continue;        // 该行完全在地图外 (上下黑边), 跳过
+    let wx = (0 - xd) * step;
+    let o = sy * dw * 4;
+    for (let sx = 0; sx < dw; sx++, o += 4, wx += step) {
       const px = Math.floor(wx), px1 = Math.floor(wx + step);
       let a = -1, b = -1, d2 = -1;
       if (rowA >= 0) {
@@ -562,9 +570,11 @@ function drawBorders(ctx, alpha, arr) {
     }
   }
   bctx.putImageData(MapView.bim, 0, 0);
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);          // 1:1 贴到设备像素, 不再二次缩放
   ctx.globalAlpha = alpha;
-  ctx.drawImage(bc, 0, 0, cw, ch);
-  ctx.globalAlpha = 1;
+  ctx.drawImage(bc, 0, 0, dw, dh);
+  ctx.restore();
 }
 
 function resizeCanvas() {
