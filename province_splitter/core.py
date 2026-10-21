@@ -158,8 +158,10 @@ def read_definition(path: str) -> Definition:
     with open(path, "rb") as f:
         raw = f.read()
     text = raw.decode("utf-8", "surrogateescape")
-    nl = "\r\n" if "\r\n" in text else "\n"
-    lines = [ln for ln in text.split(nl)]
+    # 兼容混用换行: 原版 definition.csv 是 LF, 但追加新行时可能写成 CRLF。
+    # 若只按一种换行切分, 上万行会被合并成一行 -> 解析出的记录大幅缺失。
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = [ln for ln in text.split("\n")]
     # 去掉末尾空行
     while lines and lines[-1] == "":
         lines.pop()
@@ -1699,7 +1701,7 @@ def run(cfg: Config, progress: Optional[Callable[[str], None]] = None,
             body_lines.append(s)
     buf = bytearray((nl_s.join(body_lines) + nl_s).encode("utf-8", "surrogateescape"))
     for p in new_lines:
-        buf += (";".join(p) + "\r\n").encode("utf-8", "surrogateescape")
+        buf += (";".join(p) + nl_s).encode("utf-8", "surrogateescape")
     os.makedirs(os.path.dirname(def_out), exist_ok=True)
     with open(def_out, "wb") as f:
         f.write(bytes(buf))
@@ -1714,6 +1716,17 @@ def run(cfg: Config, progress: Optional[Callable[[str], None]] = None,
             from . import canals as _canals_mod
             _log(progress, "构建新地图邻接关系 ...")
             defn2 = read_definition(def_out)
+            # 兜底: 若解析出的记录明显少于原始 definition, 说明文件换行/解析异常。
+            # 必须先修正 defn2 再做 pidmap/邻接, 否则 valid 过小会把州/战略区成员整批删光。
+            _n_parsed = len(defn2.recs)
+            if _n_parsed < len(definition.recs):
+                _merged = dict(definition.recs)
+                for _nl_ in new_lines:
+                    _merged[int(_nl_[0])] = list(_nl_)
+                defn2.recs = _merged
+                _log(progress, "[警告] definition.csv 解析异常(仅 %d 条, 原始 %d 条), "
+                               "已用内存数据兜底为 %d 条(不会删除任何州/战略区成员)"
+                     % (_n_parsed, len(definition.recs), len(_merged)))
             pidmap = load_pid_map(bmp_out, defn2)
             _pairs, nb = build_adjacency(pidmap)
             valid = set(defn2.recs)
@@ -1907,9 +1920,11 @@ def run(cfg: Config, progress: Optional[Callable[[str], None]] = None,
 def write_definition_append(path: str, new_lines: list, def_raw: bytes):
     """独立工具: 只往 definition.csv 追加行(不用于主流程)。"""
     buf = bytearray(def_raw)
+    nl_b = b"\r\n" if b"\r\n" in def_raw[:200] else b"\n"
+    nl_s = "\r\n" if nl_b == b"\r\n" else "\n"
     if not buf.endswith(b"\n"):
-        buf += b"\r\n"
+        buf += nl_b
     for p in new_lines:
-        buf += (";".join(p) + "\r\n").encode("utf-8", "surrogateescape")
+        buf += (";".join(p) + nl_s).encode("utf-8", "surrogateescape")
     with open(path, "wb") as f:
         f.write(bytes(buf))
